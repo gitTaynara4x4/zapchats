@@ -19,7 +19,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/frontend/css/base.css">
-  <link rel="stylesheet" href="/frontend/css/colaboradores.css?v=colab-visibility-20260728-1">
+  <link rel="stylesheet" href="/frontend/css/colaboradores.css?v=colab-perm-inline-20260810-1">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
   <link rel="stylesheet" href="/frontend/css/dashboard-onboarding.css?v=20260727-onboarding-v2">
 </head>
@@ -28,107 +28,60 @@
   <aside id="sidebar" data-src="/frontend/partials/sidebar.html"></aside>
 
   <main class="main colab-midias-page">
-    <header class="colab-top" aria-label="Cabeçalho de colaboradores">
+    <header class="colab-top" aria-label="Cabeçalho da equipe">
       <div class="colab-title-block">
-        <div class="colab-breadcrumb">
-          <strong>ZapsChat</strong>
-          <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
-          <span>Equipe</span>
-        </div>
-        <h1>
-          <span class="title-folder" aria-hidden="true"><i class="fa-solid fa-user-group"></i></span>
-          <span class="title-text">Colaboradores</span>
-        </h1>
+        <h1><span class="title-text">Equipe</span></h1>
+        <p class="colab-page-subtitle">Acompanhe status, departamentos e acessos da equipe.</p>
       </div>
 
       <div class="colab-top-actions">
-        <div class="colab-total-pill" aria-label="Total de usuários">
-          <strong id="count-colaboradores">0</strong>
-          <span>usuários</span>
-        </div>
-
-        <button id="btn-export-colaboradores" class="btn btn-soft" type="button">
-          <i class="fa-solid fa-download" aria-hidden="true"></i>
-          <span>Exportar CSV</span>
-        </button>
-
         <button id="btn-add-colaborador" class="btn btn-primary" type="button">
-          <i class="fa fa-plus" aria-hidden="true"></i>
-          <span>Novo colaborador</span>
+          <i class="fa-solid fa-user-plus" aria-hidden="true"></i>
+          <span>Convidar membro</span>
         </button>
       </div>
     </header>
 
-    <section class="colab-searchbar" aria-label="Busca e filtros de colaboradores">
-      <div class="search-wrap">
-        <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
-        <input id="filtro" class="input" type="search" placeholder="Buscar por nome, e-mail ou cargo..." autocomplete="off"/>
-      </div>
-
-      <div class="colab-filter-actions">
-        <select id="filtro-depto" class="select" aria-label="Filtrar por departamento">
-          <option value="">Todos os departamentos</option>
-        </select>
-
-        <button id="btn-filtrar" class="btn btn-soft" type="button">
-          <i class="fa fa-filter" aria-hidden="true"></i>
-          <span>Filtrar</span>
-        </button>
-      </div>
-    </section>
-
-    <section class="colab-stats" aria-label="Resumo rápido de colaboradores">
-      <article class="stat-card">
-        <span class="stat-icon"><i class="fa-regular fa-user" aria-hidden="true"></i></span>
-        <span class="stat-copy">
-          <small>Exibidos</small>
-          <strong id="stat-colab-total">0</strong>
-        </span>
-      </article>
-
-      <article class="stat-card">
-        <span class="stat-icon success"><i class="fa-regular fa-circle-check" aria-hidden="true"></i></span>
-        <span class="stat-copy">
-          <small>Ativos</small>
-          <strong id="stat-colab-active">0</strong>
-        </span>
-      </article>
-
-      <article class="stat-card">
-        <span class="stat-icon warn"><i class="fa-regular fa-clock" aria-hidden="true"></i></span>
-        <span class="stat-copy">
-          <small>Pendências</small>
-          <strong id="stat-colab-pending">0</strong>
-        </span>
-      </article>
-
-      <article class="stat-card">
-        <span class="stat-icon"><i class="fa-regular fa-square-check" aria-hidden="true"></i></span>
-        <span class="stat-copy">
-          <small>Selecionados</small>
-          <strong id="stat-colab-selected">0</strong>
-        </span>
-      </article>
-
-      <label class="stat-card stat-card-security" for="chk-requer-token">
-        <span class="stat-icon success"><i class="fa-solid fa-shield-halved" aria-hidden="true"></i></span>
-        <span class="stat-copy">
-          <small>Código de login <span class="zc-help-icon" tabindex="0" role="button" aria-label="Ajuda sobre código de login" data-help="Quando ativado, o colaborador informa um código enviado por e-mail depois da senha."><i class="fa-regular fa-circle-question"></i></span></small>
-          <strong id="stat-security-text">Segurança extra</strong>
-        </span>
-        <input type="checkbox" id="chk-requer-token" aria-label="Exigir código de login por e-mail">
-      </label>
-    </section>
-
     <section class="colab-shell" aria-label="Gerenciador de colaboradores">
       <div class="colab-workspace">
         <section class="panel colab-table-panel" aria-labelledby="colab-list-title">
-          <div class="panel-head files-head">
-            <div>
-              <h2 id="colab-list-title">Equipe</h2>
-              <p>Acompanhe status, departamentos e acessos da equipe.</p>
+          <h2 id="colab-list-title" class="colab-visually-hidden">Equipe</h2>
+
+          <div class="colab-list-toolbar" aria-label="Busca e filtros da equipe">
+            <div class="colab-searchbar">
+              <div class="search-wrap">
+                <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
+                <input id="filtro" class="input" type="search" placeholder="Buscar por nome, e-mail ou @usuário" autocomplete="off"/>
+              </div>
+
+              <div class="department-filter-wrap">
+                <i class="fa-solid fa-filter" aria-hidden="true"></i>
+                <select id="filtro-depto" class="select" aria-label="Filtrar por departamento">
+                  <option value="">Filtrar por departamento</option>
+                </select>
+              </div>
+
+              <button id="btn-filtrar" class="colab-compat-filter" type="button" tabindex="-1" aria-hidden="true">Filtrar</button>
+            </div>
+
+            <div class="colab-toolbar-actions">
+              <label class="colab-security-control" for="chk-requer-token" title="Exigir um código enviado por e-mail após a senha">
+                <span class="colab-security-icon" aria-hidden="true"><i class="fa-solid fa-shield-halved"></i></span>
+                <span class="colab-security-copy">
+                  <small>Código de login</small>
+                  <strong id="stat-security-text">Segurança extra</strong>
+                </span>
+                <input type="checkbox" id="chk-requer-token" aria-label="Exigir código de login por e-mail">
+              </label>
+
+              <button id="btn-export-colaboradores" class="btn btn-soft colab-export-btn" type="button">
+                <i class="fa-solid fa-download" aria-hidden="true"></i>
+                <span>Exportar</span>
+              </button>
             </div>
           </div>
+
+          <span id="count-colaboradores" class="colab-visually-hidden">0</span>
 
           <div id="colab-list-region" class="colab-list-region is-loading" aria-busy="true">
             <div id="colab-loading-state" class="colab-list-feedback colab-loading-state" role="status" aria-live="polite">
@@ -208,10 +161,70 @@
 
   <div id="modal-perfil" class="modal-back colab-wizard-modal zc-saas-modal" aria-hidden="true">
     <div class="modal-card perfil-modal-card" role="dialog" aria-modal="true" aria-labelledby="perfil-title">
-      <div class="modal-head colab-clean-head">
-        <div class="colab-modal-heading">
-          <span id="perfil-title">Novo colaborador</span>
+      <aside class="colab-profile-rail" aria-label="Resumo do colaborador">
+        <div class="colab-profile-rail-art" aria-hidden="true"></div>
+
+        <div class="colab-profile-avatar-area">
+          <button class="avatar-wrap colab-photo-preview" id="avatar-wrap" type="button"
+                  aria-label="Adicionar ou alterar foto de perfil">
+            <img id="p-avatar" alt="Foto do colaborador">
+            <span id="p-mono" aria-hidden="true">?</span>
+            <span class="colab-profile-avatar-badge" aria-hidden="true">
+              <i class="fa-solid fa-camera"></i>
+            </span>
+          </button>
+
+          <div id="avatar-hint" class="colab-photo-actions colab-profile-photo-action">
+            <button id="btn-add-avatar" class="colab-photo-action" type="button">
+              <i class="fa-regular fa-image" aria-hidden="true"></i>
+              <span>
+                <strong>Alterar foto</strong>
+                <small>JPG, PNG ou WEBP de até 5 MB</small>
+              </span>
+            </button>
+            <input id="p-avatar-input" type="file" hidden
+                   accept="image/*,.svg,.webp,.avif,.heic,.heif">
+          </div>
+        </div>
+
+        <div class="colab-profile-summary">
+          <h2 id="side-preview-name">Novo colaborador</h2>
+          <span id="side-preview-account-status" class="colab-profile-account-status is-active">
+            <span aria-hidden="true"></span>
+            Ativo
+          </span>
           <small id="perfil-subtitle">Convide alguém para acessar a plataforma</small>
+
+          <span class="colab-profile-presence-compat" aria-hidden="true">
+            <span id="p-status"></span>
+            <span id="p-status-text">Disponível</span>
+          </span>
+        </div>
+
+        <div class="colab-profile-meta">
+          <div class="colab-profile-meta-item">
+            <span class="colab-profile-meta-icon" aria-hidden="true"><i class="fa-regular fa-building"></i></span>
+            <span>
+              <small>Departamento</small>
+              <strong id="side-preview-dept">Não definido</strong>
+            </span>
+          </div>
+
+          <div class="colab-profile-meta-item">
+            <span class="colab-profile-meta-icon" aria-hidden="true"><i class="fa-solid fa-briefcase"></i></span>
+            <span>
+              <small>Cargo</small>
+              <strong id="side-preview-role">Personalize o perfil do colaborador</strong>
+            </span>
+          </div>
+
+          <span id="side-preview-company" class="colab-profile-company-compat" aria-hidden="true">Empresa atual</span>
+        </div>
+      </aside>
+
+      <div class="modal-head colab-clean-head">
+        <div class="colab-modal-heading colab-modal-heading-compat">
+          <span id="perfil-title">Novo colaborador</span>
         </div>
 
         <!-- Controles antigos mantidos apenas para compatibilidade com o módulo atual. -->
@@ -228,23 +241,31 @@
       <div class="modal-body">
         <nav class="colab-tabs colab-wizard-steps" role="tablist" aria-label="Etapas do colaborador">
           <button class="colab-tab active" type="button" role="tab" aria-selected="true" data-tab="perfil">
-            <span class="step-number">1</span>
+            <span class="step-icon" aria-hidden="true"><i class="fa-regular fa-user"></i></span>
             <span class="step-copy">
               <strong>Dados básicos</strong>
               <small>Nome, e-mail e função</small>
             </span>
           </button>
 
-          <button class="colab-tab" type="button" role="tab" aria-selected="false" data-tab="acessos">
-            <span class="step-number">2</span>
+          <button class="colab-tab" type="button" role="tab" aria-selected="false" data-tab="login">
+            <span class="step-icon" aria-hidden="true"><i class="fa-solid fa-key"></i></span>
             <span class="step-copy">
-              <strong>Acesso</strong>
-              <small>Login e WhatsApps</small>
+              <strong>Login</strong>
+              <small>Convite ou senha</small>
+            </span>
+          </button>
+
+          <button class="colab-tab" type="button" role="tab" aria-selected="false" data-tab="atendimento">
+            <span class="step-icon" aria-hidden="true"><i class="fa-regular fa-comments"></i></span>
+            <span class="step-copy">
+              <strong>Atendimento</strong>
+              <small>Deptos, WhatsApps e conversas</small>
             </span>
           </button>
 
           <button class="colab-tab" type="button" role="tab" aria-selected="false" data-tab="permissoes">
-            <span class="step-number">3</span>
+            <span class="step-icon" aria-hidden="true"><i class="fa-regular fa-shield"></i></span>
             <span class="step-copy">
               <strong>Permissões</strong>
               <small>O que pode acessar</small>
@@ -252,77 +273,28 @@
           </button>
         </nav>
 
-        <div class="colab-legacy-compat" aria-hidden="true">
-          <span id="p-status"></span>
-          <span id="p-status-text">Disponível</span>
-          <span id="side-preview-name">Novo colaborador</span>
-          <span id="side-preview-role">Personalize o perfil do colaborador</span>
-          <span id="side-preview-company">Empresa atual</span>
-          <span id="side-preview-dept">Não definido</span>
-        </div>
-
         <div class="colab-layout colab-layout-single">
           <section class="colab-main">
             <div class="colab-panel-card">
               <!-- ETAPA 1 -->
               <section class="colab-panel active" data-panel="perfil" role="tabpanel">
                 <div class="panel-title colab-form-heading">
-                  <span class="panel-title-icon" aria-hidden="true">
-                    <i class="fa-solid fa-user"></i>
-                  </span>
                   <div>
                     <h3>
-                      Informações do colaborador
+                      Informações pessoais
                       <span class="zc-help-icon" tabindex="0" role="button" aria-label="Ajuda sobre dados básicos" data-help="Preencha nome, e-mail, cargo e telefone se quiser. A empresa é preenchida automaticamente."><i class="fa-regular fa-circle-question"></i></span>
                     </h3>
-                    <p class="panel-description">Preencha os dados básicos para convidar o colaborador.</p>
+                    <p class="panel-description">Atualize os dados básicos do colaborador.</p>
                     <p class="required-fields-note"><span aria-hidden="true">*</span> Campos obrigatórios</p>
                   </div>
                 </div>
 
-                <div class="colab-photo-editor" id="colab-photo-editor">
-                  <button class="avatar-wrap colab-photo-preview" id="avatar-wrap" type="button"
-                          aria-label="Adicionar ou alterar foto de perfil">
-                    <img id="p-avatar" alt="Foto do colaborador">
-                    <span id="p-mono" aria-hidden="true">?</span>
-                    <span class="colab-photo-camera" aria-hidden="true">
-                      <i class="fa-solid fa-camera"></i>
-                    </span>
-                  </button>
-
-                  <div class="colab-photo-copy">
-                    <strong>Foto de perfil</strong>
-                    <span>Adicione uma foto para identificar o colaborador com mais facilidade.</span>
-
-                    <div id="avatar-hint" class="colab-photo-actions">
-                      <button id="btn-add-avatar" class="colab-photo-action" type="button">
-                        <i class="fa-regular fa-image" aria-hidden="true"></i>
-                        <span>
-                          <strong>Adicionar foto</strong>
-                          <small>JPG, PNG ou WEBP de até 5 MB</small>
-                        </span>
-                      </button>
-                      <input id="p-avatar-input" type="file" hidden
-                             accept="image/*,.svg,.webp,.avif,.heic,.heif">
-                    </div>
-                  </div>
-                </div>
-
                 <dl class="details-grid colab-basic-grid" id="details-grid">
-                  <div class="full">
+                  <div class="half">
                     <dt>Nome completo <span class="required-mark" aria-hidden="true">*</span></dt>
                     <dd>
                       <div class="fieldbox" id="fb-nome">
                         <span id="v-nome">—</span>
-                      </div>
-                    </dd>
-                  </div>
-
-                  <div class="half">
-                    <dt>E-mail <span class="required-mark" aria-hidden="true">*</span></dt>
-                    <dd>
-                      <div class="fieldbox" id="fb-email">
-                        <a id="v-email" href="#">—</a>
                       </div>
                     </dd>
                   </div>
@@ -336,6 +308,15 @@
                     </dd>
                   </div>
 
+                  <div class="half">
+                    <dt>E-mail <span class="required-mark" aria-hidden="true">*</span></dt>
+                    <dd>
+                      <div class="fieldbox" id="fb-email">
+                        <a id="v-email" href="#">—</a>
+                      </div>
+                    </dd>
+                  </div>
+
                   <div class="half optional-field">
                     <dt>Telefone <small>(opcional)</small></dt>
                     <dd>
@@ -345,21 +326,29 @@
                     </dd>
                   </div>
 
-                  <div class="half optional-field company-field">
+                  <div class="full optional-field company-field">
                     <dt>Empresa</dt>
                     <dd>
                       <div class="fieldbox company-readonly" id="fb-empresa">
+                        <span class="company-leading-icon" aria-hidden="true"><i class="fa-regular fa-building"></i></span>
                         <span id="v-empresa">—</span>
                         <i class="fa-solid fa-lock" aria-hidden="true"></i>
                       </div>
-                      <small class="field-helper">Empresa definida automaticamente</small>
+                      <small class="field-helper">Empresa definida automaticamente. Não é possível editar.</small>
                     </dd>
                   </div>
                 </dl>
 
-                <section class="colab-schedule-block" aria-labelledby="colab-expediente-title">
-                  <h4 id="colab-expediente-title">Expediente</h4>
-
+                <section class="colab-schedule-block is-collapsed" aria-labelledby="colab-expediente-title">
+                  <button id="colab-expediente-toggle" class="colab-schedule-summary" type="button" aria-expanded="false" aria-controls="colab-expediente-content">
+                    <span class="colab-schedule-summary-icon" aria-hidden="true"><i class="fa-regular fa-calendar"></i></span>
+                    <span class="colab-schedule-summary-copy">
+                      <strong id="colab-expediente-title">Expediente</strong>
+                      <small>Configure dias e horários de trabalho.</small>
+                    </span>
+                    <span class="colab-schedule-summary-chevron" aria-hidden="true"><i class="fa-solid fa-chevron-down"></i></span>
+                  </button>
+                  <div id="colab-expediente-content" class="colab-schedule-content" hidden>
                   <dl class="details-grid colab-schedule-grid">
                     <div class="full" id="row-exp-toggle">
                       <dd>
@@ -403,20 +392,21 @@
                       </dd>
                     </div>
                   </dl>
+                  </div>
                 </section>
               </section>
 
-              <!-- ETAPA 2 -->
-              <section class="colab-panel" data-panel="acessos" role="tabpanel" hidden>
+              <!-- ETAPA 2 — LOGIN -->
+              <section class="colab-panel colab-login-panel" data-panel="login" role="tabpanel" hidden>
                 <div class="panel-title">
                   <div>
-                    <h3><i class="fa-solid fa-key"></i> Acesso <span id="acesso-help-icon" class="zc-help-icon" tabindex="0" role="button" aria-label="Ajuda sobre acesso" data-help="O colaborador precisa ter acesso ao WhatsApp onde a mensagem chegou e ao departamento da conversa. Permissões definem o que ele pode fazer dentro do sistema."><i class="fa-regular fa-circle-question"></i></span></h3>
-                    <p class="panel-hint-sr">Configure o convite de login, departamentos e WhatsApps.</p>
+                    <h3><i class="fa-solid fa-key"></i> Login <span id="acesso-help-icon" class="zc-help-icon" tabindex="0" role="button" aria-label="Ajuda sobre login" data-help="Escolha como o colaborador entrará no ZapsChat. O convite por e-mail permite que ele crie a própria senha; a senha temporária exige troca no primeiro acesso."><i class="fa-regular fa-circle-question"></i></span></h3>
+                    <p>Defina somente como este colaborador entrará no ZapsChat.</p>
                   </div>
                 </div>
 
-                <dl class="details-grid">
-                  <div class="full">
+                <dl class="details-grid colab-login-grid">
+<div class="full">
                     <dt><span id="access-mode-title">Forma de acesso</span> <span id="access-mode-help" class="zc-help-icon zc-help-icon-tiny" tabindex="0" role="button" aria-label="Ajuda sobre forma de acesso" data-help="Convite por e-mail é o padrão recomendado. Senha manual é temporária e exige troca no primeiro acesso."><i class="fa-regular fa-circle-question"></i></span></dt>
                     <dd>
                       <div class="fieldbox advanced-card" id="fb-senha">
@@ -457,8 +447,28 @@
                       </div>
                     </dd>
                   </div>
+                </dl>
 
-                  <div class="full" id="deptos-full">
+                <div class="colab-step-note colab-login-note" role="note">
+                  <span class="colab-step-note-icon" aria-hidden="true"><i class="fa-solid fa-shield-halved"></i></span>
+                  <div>
+                    <strong>Login separado do atendimento</strong>
+                    <span>Departamentos, WhatsApps e conversas ficam na próxima etapa. Aqui você configura apenas o acesso à conta.</span>
+                  </div>
+                </div>
+              </section>
+
+              <!-- ETAPA 3 — ATENDIMENTO -->
+              <section class="colab-panel colab-atendimento-panel" data-panel="atendimento" role="tabpanel" hidden>
+                <div class="panel-title">
+                  <div>
+                    <h3><i class="fa-regular fa-comments"></i> Atendimento <span id="atendimento-help-icon" class="zc-help-icon" tabindex="0" role="button" aria-label="Ajuda sobre atendimento" data-help="Defina em quais departamentos e WhatsApps o colaborador poderá trabalhar e quais conversas ficarão visíveis para ele."><i class="fa-regular fa-circle-question"></i></span></h3>
+                    <p>Escolha onde ele atende e quais conversas aparecem para este perfil.</p>
+                  </div>
+                </div>
+
+                <dl class="details-grid colab-atendimento-grid">
+<div class="full" id="deptos-full">
                     <dt>Departamentos que atende</dt>
                     <dd>
                       <div id="deptos-wrap" class="fieldbox advanced-card">
@@ -477,8 +487,7 @@
                       </div>
                     </dd>
                   </div>
-
-                  <div class="full" id="insts-full">
+<div class="full" id="insts-full">
                     <dt>WhatsApps permitidos</dt>
                     <dd>
                       <div id="insts-wrap" class="fieldbox advanced-card">
@@ -507,14 +516,13 @@
                       </div>
                     </dd>
                   </div>
-
-                  <div class="full" id="conversation-visibility-full">
+<div class="full" id="conversation-visibility-full">
                     <dt>Visibilidade das conversas</dt>
                     <dd>
                       <div id="conversation-visibility-wrap" class="fieldbox advanced-card conversation-visibility-card">
                         <div class="conversation-visibility-title-line">
                           <span>Quais conversas este colaborador pode visualizar?</span>
-                          <span class="zc-help-icon" tabindex="0" role="button" aria-label="Ajuda sobre visibilidade das conversas" data-help="O acesso ao número do WhatsApp e a visibilidade das conversas são configurações separadas. Você pode permitir o uso de um número sem liberar as conversas dos outros colaboradores."><i class="fa-regular fa-circle-question"></i></span>
+                          <span class="zc-help-icon" tabindex="0" role="button" aria-label="Ajuda sobre visibilidade das conversas" data-help="Esta configuração define quais conversas aparecem para o colaborador. Visualizar uma conversa não significa, necessariamente, poder responder: o envio continua seguindo as regras de Atendimento, como assumir, participar, atribuição e transferência."><i class="fa-regular fa-circle-question"></i></span>
                         </div>
 
                         <div class="conversation-visibility-grid" id="conversation-visibility-grid">
@@ -523,7 +531,7 @@
                             <span class="conversation-visibility-icon" aria-hidden="true"><i class="fa-solid fa-inbox"></i></span>
                             <span class="conversation-visibility-copy">
                               <strong>Todas as conversas permitidas</strong>
-                              <small>Vê as conversas dos WhatsApps e departamentos liberados para o perfil.</small>
+                              <small>Vê as conversas dos WhatsApps e departamentos liberados, inclusive as que estão aguardando atendimento.</small>
                             </span>
                           </label>
 
@@ -532,21 +540,29 @@
                             <span class="conversation-visibility-icon" aria-hidden="true"><i class="fa-solid fa-user-lock"></i></span>
                             <span class="conversation-visibility-copy">
                               <strong>Somente minhas conversas</strong>
-                              <small>Vê apenas conversas iniciadas, assumidas, atribuídas ou transferidas para ela.</small>
+                              <small>Vê somente conversas iniciadas, assumidas, atribuídas ou transferidas para este colaborador.</small>
                             </span>
                           </label>
                         </div>
 
                         <p id="conversation-visibility-summary" class="help-text conversation-visibility-summary">
-                          Este colaborador verá todas as conversas dentro dos acessos permitidos.
+                          Este colaborador verá todas as conversas dentro dos WhatsApps e departamentos permitidos.
                         </p>
+
+                        <div class="conversation-message-rule" role="note">
+                          <span class="conversation-message-rule-icon" aria-hidden="true"><i class="fa-regular fa-message"></i></span>
+                          <div class="conversation-message-rule-copy">
+                            <strong>Como funciona o envio de mensagens?</strong>
+                            <span>Esta opção controla <b>o que o colaborador consegue visualizar</b>. Para responder, ele ainda precisa seguir as regras do Atendimento — como assumir ou participar da conversa quando necessário. Se outro atendente já estiver responsável, a conversa continua respeitando essa responsabilidade.</span>
+                          </div>
+                        </div>
                       </div>
                     </dd>
                   </div>
                 </dl>
               </section>
 
-              <!-- ETAPA 3 -->
+              <!-- ETAPA 4 -->
               <section class="colab-panel" data-panel="permissoes" role="tabpanel" hidden>
                 <div class="panel-title">
                   <div>
@@ -630,7 +646,7 @@
 
   <div id="toast" role="status" aria-live="polite"></div>
 
-  <script type="module" src="/frontend/js/pages/colaboradores/index.js?v=colab-visibility-20260728-1"></script>
+  <script type="module" src="/frontend/js/pages/colaboradores/index.js?v=colab-perm-inline-20260810-1"></script>
 
   <!-- Wizard controlado por frontend/js/pages/colaboradores/modal.js para evitar eventos duplicados. -->
 

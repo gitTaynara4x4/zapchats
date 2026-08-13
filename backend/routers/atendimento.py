@@ -1847,8 +1847,17 @@ def apagar_conversa_permanente(
     perms = set(identity.get("permissoes") or [])
     is_admin = bool(identity.get("is_admin") or identity.get("admin")) or _is_admin(identity)
 
-    if not (is_admin or "atendimento.apagar_conversas" in perms):
-        raise HTTPException(status_code=403, detail="Sem permissão para apagar conversas")
+    pode_apagar_conversa = "atendimento.apagar_conversas" in perms
+    pode_excluir_cliente = "clientes.excluir" in perms
+
+    if not (is_admin or (pode_apagar_conversa and pode_excluir_cliente)):
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Para apagar permanentemente é necessário ter as permissões "
+                "atendimento.apagar_conversas e clientes.excluir."
+            ),
+        )
 
     cliente_pk = _resolve_cliente_pk(db, int(empresa_id), int(cliente_id))
     if not cliente_pk:

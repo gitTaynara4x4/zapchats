@@ -1132,3 +1132,265 @@ body.zc-no-scroll{
     max-height:calc(100vh - 150px);
   }
 }
+
+/* ZAPSCHAT AUDIO PLAYER V2 - fonte visual autoritativa */
+/*
+   O media-render também injeta estilos genéricos para compatibilidade.
+   Estes seletores são mais específicos e passam a ser a fonte visual final
+   do player dentro do histórico, evitando o conflito que achatava a waveform.
+*/
+#historico .msg-media-audio{
+  width:auto !important;
+  max-width:100% !important;
+  margin-top:2px !important;
+}
+
+#historico .wa-audio{
+  --p:0%;
+  --zc-audio-accent:#53bdeb;
+  --zc-audio-wave:rgba(84,101,111,.42);
+  --zc-audio-time:#667781;
+  display:grid !important;
+  grid-template-columns:auto minmax(0, 1fr) !important;
+  align-items:center !important;
+  gap:9px !important;
+  width:300px !important;
+  min-width:240px !important;
+  max-width:min(100%, 76vw) !important;
+  padding:4px 2px 3px !important;
+  margin:0 !important;
+  border:0 !important;
+  border-radius:0 !important;
+  background:transparent !important;
+  box-shadow:none !important;
+  overflow:visible !important;
+  user-select:none;
+}
+
+#historico .wa-audio .wa-left{
+  display:flex !important;
+  align-items:center !important;
+  gap:6px !important;
+  flex:0 0 auto !important;
+  min-width:0 !important;
+}
+
+#historico .wa-audio .wa-avatar{
+  position:relative !important;
+  width:40px !important;
+  height:40px !important;
+  flex:0 0 40px !important;
+  border-radius:50% !important;
+  overflow:hidden !important;
+  background:rgba(134,150,160,.18) !important;
+  box-shadow:none !important;
+}
+
+#historico .wa-audio .wa-avatar img,
+#historico .wa-audio .wa-avatar .ph{
+  position:absolute !important;
+  inset:0 !important;
+  width:100% !important;
+  height:100% !important;
+  border-radius:50% !important;
+}
+
+#historico .wa-audio .wa-avatar img{
+  display:block !important;
+  object-fit:cover !important;
+}
+
+#historico .wa-audio .wa-avatar .ph{
+  display:grid !important;
+  place-items:center !important;
+  color:#8696a0 !important;
+}
+
+#historico .wa-audio .wa-avatar .ph svg{
+  width:20px !important;
+  height:20px !important;
+}
+
+/* O badge de microfone antigo podia herdar/competir com estilos e ficar sobre o avatar. */
+#historico .wa-audio .wa-avatar .mic{
+  display:none !important;
+}
+
+#historico .wa-audio .wa-play{
+  display:grid !important;
+  place-items:center !important;
+  width:30px !important;
+  height:30px !important;
+  min-width:30px !important;
+  padding:0 !important;
+  margin:0 !important;
+  border:0 !important;
+  border-radius:50% !important;
+  background:transparent !important;
+  color:var(--zc-audio-accent) !important;
+  box-shadow:none !important;
+  cursor:pointer !important;
+  transition:background-color .15s ease, transform .08s ease !important;
+}
+
+#historico .wa-audio .wa-play:hover{
+  background:rgba(83,189,235,.10) !important;
+}
+
+#historico .wa-audio .wa-play:active{
+  transform:scale(.96) !important;
+}
+
+#historico .wa-audio .wa-play svg{
+  width:21px !important;
+  height:21px !important;
+  display:block !important;
+}
+
+#historico .wa-audio .wa-speed{
+  height:24px !important;
+  min-width:38px !important;
+  padding:0 7px !important;
+  border:0 !important;
+  border-radius:999px !important;
+  background:rgba(84,101,111,.10) !important;
+  color:var(--zc-audio-time) !important;
+  font-size:10px !important;
+  font-weight:700 !important;
+  line-height:24px !important;
+  cursor:pointer !important;
+}
+
+#historico .wa-audio .wa-main{
+  display:flex !important;
+  flex-direction:column !important;
+  justify-content:center !important;
+  gap:1px !important;
+  min-width:0 !important;
+  width:100% !important;
+}
+
+#historico .wa-audio .wa-wave{
+  position:relative !important;
+  width:100% !important;
+  height:28px !important;
+  min-height:28px !important;
+  display:block !important;
+  cursor:pointer !important;
+  outline:none !important;
+  touch-action:none !important;
+  overflow:visible !important;
+}
+
+#historico .wa-audio .wa-wave .dots,
+#historico .wa-audio .wa-wave .fill{
+  position:absolute !important;
+  inset:2px 0 !important;
+  display:flex !important;
+  align-items:center !important;
+  gap:2px !important;
+  height:auto !important;
+  width:auto !important;
+  transform:none !important;
+  border-radius:0 !important;
+  background:none !important;
+  background-image:none !important;
+  opacity:1 !important;
+  overflow:hidden !important;
+  pointer-events:none !important;
+}
+
+#historico .wa-audio .wa-wave .dots{
+  color:var(--zc-audio-wave) !important;
+}
+
+#historico .wa-audio .wa-wave .fill{
+  color:var(--zc-audio-accent) !important;
+  clip-path:inset(0 calc(100% - var(--p, 0%)) 0 0) !important;
+}
+
+#historico .wa-audio .wa-wave .dots > span,
+#historico .wa-audio .wa-wave .fill > span{
+  display:block !important;
+  flex:1 1 2px !important;
+  min-width:1px !important;
+  max-width:3px !important;
+  height:var(--h, 50%) !important;
+  min-height:3px !important;
+  border-radius:999px !important;
+  background:currentColor !important;
+}
+
+#historico .wa-audio .wa-wave .knob{
+  position:absolute !important;
+  z-index:3 !important;
+  top:50% !important;
+  left:var(--p, 0%) !important;
+  width:9px !important;
+  height:9px !important;
+  transform:translate(-50%, -50%) !important;
+  border:0 !important;
+  border-radius:50% !important;
+  background:var(--zc-audio-accent) !important;
+  box-shadow:none !important;
+  pointer-events:none !important;
+}
+
+#historico .wa-audio .wa-len{
+  display:block !important;
+  min-height:13px !important;
+  margin:0 !important;
+  padding:0 !important;
+  color:var(--zc-audio-time) !important;
+  font-size:11px !important;
+  font-weight:400 !important;
+  line-height:13px !important;
+  opacity:1 !important;
+  text-align:left !important;
+}
+
+#historico .wa-audio[data-playing="1"] .wa-play{
+  color:var(--zc-audio-accent) !important;
+}
+
+html[data-theme="dark"] #historico .wa-audio{
+  --zc-audio-accent:#53bdeb;
+  --zc-audio-wave:rgba(209,215,219,.38);
+  --zc-audio-time:#aebac1;
+}
+
+html[data-theme="dark"] #historico .wa-audio .wa-speed{
+  background:rgba(233,237,239,.10) !important;
+}
+
+.bubble-out #historico .wa-audio,
+#historico .bubble-out .wa-audio{
+  --zc-audio-accent:#00a884;
+}
+
+@media (max-width:560px){
+  #historico .wa-audio{
+    width:270px !important;
+    min-width:0 !important;
+    max-width:calc(100vw - 84px) !important;
+    gap:7px !important;
+  }
+
+  #historico .wa-audio .wa-avatar{
+    width:36px !important;
+    height:36px !important;
+    flex-basis:36px !important;
+  }
+
+  #historico .wa-audio .wa-play{
+    width:28px !important;
+    height:28px !important;
+    min-width:28px !important;
+  }
+
+  #historico .wa-audio .wa-wave .dots,
+  #historico .wa-audio .wa-wave .fill{
+    gap:1.5px !important;
+  }
+}
+

@@ -25,6 +25,7 @@ from backend.security.atendimento_acl import (
     assert_cliente_access,
 )
 from backend.routers.atendimento_conversas.listagem import _allow_entrada_geral_colaborador
+from backend.services.chatbot_claim_policy import department_chatbot_active_for_department
 
 # =========================================================
 # Router
@@ -512,6 +513,8 @@ def _default_fila_state() -> Dict[str, Any]:
         "fila_ativa": False,
         "fila_exigir_aceite": False,
         "fila_escolhida_em": None,
+        "retorno_inatividade_ativo": False,
+        "retorno_inatividade_minutos": None,
 
         # aliases diretos para o front
         "exigir_aceite": False,
@@ -543,6 +546,22 @@ def _fila_state_for_atendimento(
     if fila_id is None:
         return state
 
+    empresa_id = _to_int(getattr(atendimento, "empresa_id", None))
+    instancia_id = _to_int(getattr(atendimento, "instancia_id", None))
+    departamento_id = _to_int(getattr(atendimento, "departamento_id", None))
+    if (
+        empresa_id is None
+        or instancia_id is None
+        or departamento_id is None
+        or not department_chatbot_active_for_department(
+            db,
+            empresa_id=int(empresa_id),
+            instancia_id=int(instancia_id),
+            departamento_id=int(departamento_id),
+        )
+    ):
+        return state
+
     state["fila_id"] = int(fila_id)
     state["fila_escolhida_em"] = _iso_utc(getattr(atendimento, "fila_escolhida_em", None))
 
@@ -572,6 +591,8 @@ def _fila_state_for_atendimento(
             "fila_cor": getattr(fila, "cor", None),
             "fila_ativa": bool(getattr(fila, "ativa", False)),
             "fila_exigir_aceite": exigir,
+            "retorno_inatividade_ativo": bool(getattr(fila, "retorno_inatividade_ativo", False)),
+            "retorno_inatividade_minutos": getattr(fila, "retorno_inatividade_minutos", None),
             "exigir_aceite": exigir,
             "aceite_obrigatorio": exigir,
         }
@@ -827,6 +848,7 @@ def listar_mensagens_por_data(
     limit: int = Query(80, ge=1, le=120),
     instancia_id: int | None = Query(None, description="(Opcional) Filtra mensagens por instância id numérico"),
     instance: str | None = Query(None, description="(Opcional) Filtra mensagens por instância slug/nome"),
+    kind: str | None = Query(None, description="Tipo da conversa: c=cliente, g=grupo."),
     db: Session = Depends(get_db),
     identity=Depends(get_current_identity),
 ):
@@ -880,7 +902,8 @@ def listar_mensagens_por_data(
         .first()
     )
 
-    if cli:
+    kind_norm = str(kind or "").strip().lower()
+    if cli and kind_norm != "g":
         cliente_acl, atendimento_acl = assert_cliente_access(
             db,
             identity=identity,
@@ -1076,6 +1099,9 @@ def listar_mensagens_por_data(
     # ============================================
     # 2) fallback: tenta como GRUPO
     # ============================================
+    if kind_norm == "c":
+        raise HTTPException(status_code=404, detail="Conversa de cliente não encontrada nessa empresa.")
+
     grp = (
         db.query(models.Grupo)
         .filter(
@@ -1243,6 +1269,7 @@ def listar_mensagens(
     before_id: int | None = Query(None, ge=1, description="(Opcional) Cursor: mensagens mais antigas que este id."),
     instancia_id: int | None = Query(None, description="(Opcional) Filtra mensagens por instância id numérico"),
     instance: str | None = Query(None, description="(Opcional) Filtra mensagens por instância slug/nome"),
+    kind: str | None = Query(None, description="Tipo da conversa: c=cliente, g=grupo."),
     since_ts: datetime | None = Query(None, description="(Opcional) Cursor: mensagens com timestamp > since_ts ISO."),
     since_id: int | None = Query(None, description="(Opcional) Cursor: mensagens com id > since_id."),
     db: Session = Depends(get_db),
@@ -1284,7 +1311,8 @@ def listar_mensagens(
         .first()
     )
 
-    if cli:
+    kind_norm = str(kind or "").strip().lower()
+    if cli and kind_norm != "g":
         cliente_acl, atendimento_acl = assert_cliente_access(
             db,
             identity=identity,
@@ -1312,59 +1340,83 @@ def listar_mensagens(
                     models.Mensagem.instancia_id.in_([int(x) for x in allowed_instancias])
                 )
 
-        q = (
-            db.query(
-                models.Mensagem.id,
-                models.Mensagem.msg_id,
-                models.Mensagem.conteudo,
-                models.Mensagem.tipo,
-                models.Mensagem.ack,
-                models.Mensagem.timestamp,
-                models.Mensagem.instancia_id,
-                models.Mensagem.colaborador_id,
-                models.Colaborador.nome.label("colaborador_nome"),
-                models.Mensagem.quoted,
-                models.Mensagem.quoted_preview,
-                models.EmpresaInstancia.instance_name.label("instance_name"),
-                models.Mensagem.apagada_cliente,
-                models.Mensagem.apagada_usuario,
-            )
-            .outerjoin(
-                models.EmpresaInstancia,
-                models.EmpresaInstancia.id == models.Mensagem.instancia_id,
-            )
-            .outerjoin(
-                models.Colaborador,
-                models.Colaborador.id == models.Mensagem.colaborador_id,
-            )
-            .filter(
-                models.Mensagem.empresa_id == int(empresa_id_eff),
-                models.Mensagem.cliente_id == int(cliente_id),
-                models.Mensagem.apagada_usuario == False,  # noqa: E712
-                *instancia_filters,
-            )
+        # Busca em duas etapas:
+        # 1) localiza apenas os IDs das poucas mensagens necessárias usando índice composto;
+        # 2) só então faz JOIN de instância/colaborador para esses IDs.
+        # Isso evita ordenar/joinar todo o histórico de clientes antigos.
+        id_q = db.query(models.Mensagem.id, models.Mensagem.timestamp).filter(
+            models.Mensagem.empresa_id == int(empresa_id_eff),
+            models.Mensagem.cliente_id == int(cliente_id),
+            models.Mensagem.apagada_usuario == False,  # noqa: E712
+            *instancia_filters,
         )
 
         if since_id is not None:
-            q = q.filter(models.Mensagem.id > int(since_id))
+            id_q = id_q.filter(models.Mensagem.id > int(since_id))
 
         if since_ts is not None:
-            q = q.filter(models.Mensagem.timestamp > since_ts)
+            id_q = id_q.filter(models.Mensagem.timestamp > since_ts)
 
         if before_id is not None and since_id is None and since_ts is None:
-            q = q.filter(models.Mensagem.id < int(before_id))
+            id_q = id_q.filter(models.Mensagem.id < int(before_id))
 
         incremental = (since_ts is not None) or (since_id is not None)
         cursor_old = before_id is not None and not incremental
 
         if incremental:
-            q = q.order_by(models.Mensagem.timestamp.asc(), models.Mensagem.id.asc()).limit(limit)
+            id_q = id_q.order_by(models.Mensagem.timestamp.asc(), models.Mensagem.id.asc()).limit(limit)
         elif cursor_old:
-            q = q.order_by(models.Mensagem.id.desc()).limit(limit)
+            id_q = id_q.order_by(models.Mensagem.id.desc()).limit(limit)
         else:
-            q = q.order_by(models.Mensagem.timestamp.desc(), models.Mensagem.id.desc()).offset(offset).limit(limit)
+            id_q = (
+                id_q
+                .order_by(models.Mensagem.timestamp.desc(), models.Mensagem.id.desc())
+                .offset(offset)
+                .limit(limit)
+            )
 
-        rows = q.all()
+        id_rows = id_q.all()
+        selected_ids = [int(r.id) for r in id_rows]
+
+        if selected_ids:
+            q = (
+                db.query(
+                    models.Mensagem.id,
+                    models.Mensagem.msg_id,
+                    models.Mensagem.conteudo,
+                    models.Mensagem.tipo,
+                    models.Mensagem.ack,
+                    models.Mensagem.timestamp,
+                    models.Mensagem.instancia_id,
+                    models.Mensagem.colaborador_id,
+                    models.Colaborador.nome.label("colaborador_nome"),
+                    models.Mensagem.quoted,
+                    models.Mensagem.quoted_preview,
+                    models.EmpresaInstancia.instance_name.label("instance_name"),
+                    models.Mensagem.apagada_cliente,
+                    models.Mensagem.apagada_usuario,
+                )
+                .outerjoin(
+                    models.EmpresaInstancia,
+                    models.EmpresaInstancia.id == models.Mensagem.instancia_id,
+                )
+                .outerjoin(
+                    models.Colaborador,
+                    models.Colaborador.id == models.Mensagem.colaborador_id,
+                )
+                .filter(models.Mensagem.id.in_(selected_ids))
+            )
+
+            if incremental:
+                q = q.order_by(models.Mensagem.timestamp.asc(), models.Mensagem.id.asc())
+            elif cursor_old:
+                q = q.order_by(models.Mensagem.id.desc())
+            else:
+                q = q.order_by(models.Mensagem.timestamp.desc(), models.Mensagem.id.desc())
+
+            rows = q.all()
+        else:
+            rows = []
 
         effective_inst_id, effective_inst_name = _pick_effective_instancia_from_rows(
             resolved_inst_id=resolved_inst_id,
@@ -1483,6 +1535,9 @@ def listar_mensagens(
     # ============================================
     # 2) fallback: tenta como GRUPO
     # ============================================
+    if kind_norm == "c":
+        raise HTTPException(status_code=404, detail="Conversa de cliente não encontrada nessa empresa.")
+
     grp = (
         db.query(models.Grupo)
         .filter(
@@ -1508,54 +1563,59 @@ def listar_mensagens(
                 models.MensagemGrupo.instancia_id.in_([int(x) for x in allowed_instancias])
             )
 
-    qg = (
-        db.query(
-            models.MensagemGrupo.id,
-            models.MensagemGrupo.msg_id,
-            models.MensagemGrupo.conteudo,
-            models.MensagemGrupo.tipo,
-            models.MensagemGrupo.ack,
-            models.MensagemGrupo.timestamp,
-            models.MensagemGrupo.instancia_id,
-            models.MensagemGrupo.quoted,
-            models.MensagemGrupo.quoted_preview,
-            models.EmpresaInstancia.instance_name.label("instance_name"),
-            models.MensagemGrupo.author_jid,
-            models.MensagemGrupo.from_me,
-            models.MensagemGrupo.message_type,
-        )
-        .outerjoin(
-            models.EmpresaInstancia,
-            models.EmpresaInstancia.id == models.MensagemGrupo.instancia_id,
-        )
-        .filter(
-            models.MensagemGrupo.empresa_id == int(empresa_id_eff),
-            models.MensagemGrupo.grupo_id == int(grp.id),
-            *instancia_filters_g,
-        )
+    group_id_q = db.query(models.MensagemGrupo.id).filter(
+        models.MensagemGrupo.empresa_id == int(empresa_id_eff),
+        models.MensagemGrupo.grupo_id == int(grp.id),
+        *instancia_filters_g,
     )
 
     if since_id is not None:
-        qg = qg.filter(models.MensagemGrupo.id > int(since_id))
+        group_id_q = group_id_q.filter(models.MensagemGrupo.id > int(since_id))
 
     if since_ts is not None:
         since_epoch = _epoch_from_dt(since_ts)
-        qg = qg.filter(models.MensagemGrupo.timestamp > since_epoch)
+        group_id_q = group_id_q.filter(models.MensagemGrupo.timestamp > since_epoch)
 
     if before_id is not None and since_id is None and since_ts is None:
-        qg = qg.filter(models.MensagemGrupo.id < int(before_id))
+        group_id_q = group_id_q.filter(models.MensagemGrupo.id < int(before_id))
 
     incremental = (since_ts is not None) or (since_id is not None)
     cursor_old = before_id is not None and not incremental
 
     if incremental:
-        qg = qg.order_by(models.MensagemGrupo.id.asc()).limit(limit)
-    elif cursor_old:
-        qg = qg.order_by(models.MensagemGrupo.id.desc()).limit(limit)
+        group_id_q = group_id_q.order_by(models.MensagemGrupo.id.asc()).limit(limit)
     else:
-        qg = qg.order_by(models.MensagemGrupo.id.desc()).offset(offset).limit(limit)
+        group_id_q = group_id_q.order_by(models.MensagemGrupo.id.desc()).offset(0 if cursor_old else offset).limit(limit)
 
-    rows_g = qg.all()
+    selected_group_ids = [int(r.id) for r in group_id_q.all()]
+
+    if selected_group_ids:
+        qg = (
+            db.query(
+                models.MensagemGrupo.id,
+                models.MensagemGrupo.msg_id,
+                models.MensagemGrupo.conteudo,
+                models.MensagemGrupo.tipo,
+                models.MensagemGrupo.ack,
+                models.MensagemGrupo.timestamp,
+                models.MensagemGrupo.instancia_id,
+                models.MensagemGrupo.quoted,
+                models.MensagemGrupo.quoted_preview,
+                models.EmpresaInstancia.instance_name.label("instance_name"),
+                models.MensagemGrupo.author_jid,
+                models.MensagemGrupo.from_me,
+                models.MensagemGrupo.message_type,
+            )
+            .outerjoin(
+                models.EmpresaInstancia,
+                models.EmpresaInstancia.id == models.MensagemGrupo.instancia_id,
+            )
+            .filter(models.MensagemGrupo.id.in_(selected_group_ids))
+        )
+        qg = qg.order_by(models.MensagemGrupo.id.asc() if incremental else models.MensagemGrupo.id.desc())
+        rows_g = qg.all()
+    else:
+        rows_g = []
 
     effective_inst_id_g, effective_inst_name_g = _pick_effective_instancia_from_rows(
         resolved_inst_id=resolved_inst_id,
@@ -1650,6 +1710,7 @@ def listar_mensagens_alias_historico(
     before_id: int | None = Query(None, ge=1),
     instancia_id: int | None = Query(None),
     instance: str | None = Query(None),
+    kind: str | None = Query(None),
     since_ts: datetime | None = Query(None),
     since_id: int | None = Query(None),
     db: Session = Depends(get_db),
@@ -1665,6 +1726,7 @@ def listar_mensagens_alias_historico(
         before_id=before_id,
         instancia_id=instancia_id,
         instance=instance,
+        kind=kind,
         since_ts=since_ts,
         since_id=since_id,
         db=db,

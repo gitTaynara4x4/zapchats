@@ -8,7 +8,10 @@
   <script>
     (function () {
       try {
-        const t = localStorage.getItem('theme') || localStorage.getItem('zc:theme') || 'dark';
+        let t = localStorage.getItem('zapschat_theme') || localStorage.getItem('theme') || 'light';
+        if (t !== 'dark' && t !== 'light') t = 'light';
+        localStorage.setItem('zapschat_theme', t);
+        localStorage.setItem('theme', t);
         document.documentElement.classList.toggle('dark', t === 'dark');
         document.documentElement.setAttribute('data-theme', t);
       } catch {}
@@ -28,139 +31,222 @@
   </style>
 
   <link rel="stylesheet" href="/frontend/css/atendimentos.css"/>
-  <link rel="stylesheet" href="/frontend/css/filas.css"/>
+  <link rel="stylesheet" href="/frontend/css/filas.css?v=20260812-responsive-v4-header-fix"/>
 
-  <script src="/frontend/js/pages/filas.js" defer></script>
+  <script src="/frontend/js/pages/filas.js?v=20260811-chatbot-visual-v2" defer></script>
   <link rel="stylesheet" href="/frontend/css/dashboard-onboarding.css?v=20260727-onboarding-v2">
 </head>
 
 <body data-page="filas">
-  <aside id="sidebar" data-src="/frontend/partials/sidebar-atendimentos.html"></aside>
+  <aside id="sidebar" data-src="/frontend/partials/sidebar-atendimento/estrutura/sidebar-atendimento.html"></aside>
 
-  <main class="main">
-    <div class="section-title">
-      <h1>
-        <i class="fa-solid fa-list-check title-ico"></i>
-        Gestão de Filas
-      </h1>
+  <main class="main filas-page">
+    <header class="filas-top" aria-label="Topo da gestão de filas">
+      <div class="filas-title-block">
+        <div class="filas-breadcrumb" aria-label="Caminho">
+          <span>Automação</span>
+          <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
+          <strong>Gestão de Filas</strong>
+        </div>
 
-      <span class="tag tag-fila">Fluxo do chatbot</span>
+        <div class="filas-title-line">
+          <h1>
+            <span class="filas-title-icon" aria-hidden="true"><i class="fa-solid fa-list-check"></i></span>
+            <span>Gestão de Filas</span>
+          </h1>
+          <span class="filas-product-pill">Fila de atendimento</span>
+        </div>
+        <p>Configure como as conversas aguardam atendimento e quando voltam para a equipe.</p>
+      </div>
 
-      <div class="top-actions">
-        <button id="btnComoFuncionaFilas" type="button" class="help-trigger" aria-haspopup="dialog" aria-controls="filasHelpModal">
-          <i class="fa-solid fa-circle-question"></i>
+      <div class="top-actions filas-top-actions">
+        <button id="btnComoFuncionaFilas" type="button" class="btn btn-soft help-trigger" aria-haspopup="dialog" aria-controls="filasHelpModal">
+          <i class="fa-regular fa-circle-question"></i>
           <span>Como funciona</span>
         </button>
 
-        <button id="btnRestaurarFilas" class="btn" type="button">
+        <button id="btnRestaurarFilas" class="btn btn-soft" type="button">
           <i class="fa-solid fa-rotate-left"></i>
-          Restaurar
+          <span>Restaurar</span>
         </button>
 
-        <button id="btnNovaFila" class="btn primary" type="button">
+        <button id="btnNovaFila" class="btn btn-primary" type="button">
           <i class="fa-solid fa-plus"></i>
-          Nova fila
+          <span>Nova fila</span>
         </button>
       </div>
-    </div>
+    </header>
 
-    <div class="inline-note">
-      <i class="fa-solid fa-circle-info"></i>
-      <div>
-        As filas organizam o atendimento depois que o cliente escolhe uma opção no <strong>chatbot</strong>.
-        Exemplo: Comercial, Suporte, Financeiro, Cobrança ou Jurídico.
+    <section class="filas-shell" aria-label="Configuração das filas">
+      <div class="filas-workspace">
+        <section class="filas-assistant" aria-label="Introdução às filas">
+          <div class="filas-assistant-main">
+            <div class="zc-robot zc-robot--lg" aria-hidden="true">
+              <span class="zc-robot__head"><span class="zc-robot__face"><i></i><i></i></span></span>
+              <span class="zc-robot__body"></span>
+              <span class="zc-robot__arm zc-robot__arm--left"></span>
+              <span class="zc-robot__arm zc-robot__arm--right"></span>
+            </div>
+            <div class="filas-assistant-copy">
+              <span class="filas-kicker">Organização do atendimento</span>
+              <h2>Organize o atendimento com filas simples e previsíveis.</h2>
+              <p>O Chatbot direciona o cliente para um departamento. A fila mantém a conversa disponível até alguém assumir.</p>
+              <div class="filas-assistant-dots" aria-hidden="true"><span class="active"></span><span></span><span></span></div>
+            </div>
+          </div>
+
+          <div class="filas-flow-card" aria-label="Fluxo do atendimento">
+            <div class="filas-flow-title"><i class="fa-solid fa-wand-magic-sparkles"></i> Fluxo do atendimento</div>
+            <div class="filas-flow">
+              <div class="filas-flow-step"><span><i class="fa-solid fa-robot"></i></span><small>Chatbot</small></div>
+              <i class="fa-solid fa-arrow-right filas-flow-arrow" aria-hidden="true"></i>
+              <div class="filas-flow-step"><span><i class="fa-solid fa-sitemap"></i></span><small>Departamento</small></div>
+              <i class="fa-solid fa-arrow-right filas-flow-arrow" aria-hidden="true"></i>
+              <div class="filas-flow-step"><span><i class="fa-solid fa-list-ul"></i></span><small>Fila</small></div>
+              <i class="fa-solid fa-arrow-right filas-flow-arrow" aria-hidden="true"></i>
+              <div class="filas-flow-step"><span><i class="fa-regular fa-user"></i></span><small>Atendente</small></div>
+            </div>
+          </div>
+        </section>
+
+        <div class="inline-note filas-inline-note">
+          <i class="fa-solid fa-circle-info"></i>
+          <div>
+            A fila é a área de espera do departamento. Se o atendente assumir e ficar sem responder pelo tempo configurado,
+            a conversa volta automaticamente para a fila e fica disponível para a equipe novamente.
+          </div>
+        </div>
+
+        <section id="chatbotFilasGate" class="chatbot-gate filas-chatbot-gate" hidden aria-live="polite">
+          <div class="filas-gate-icon" aria-hidden="true">
+            <span><i class="fa-solid fa-robot"></i></span>
+            <i class="fa-solid fa-gear"></i>
+          </div>
+          <h2>Configure o Chatbot antes de usar filas</h2>
+          <p>As filas só ficam disponíveis quando o menu de departamentos estiver ligado em pelo menos um WhatsApp.</p>
+          <a class="btn btn-primary filas-gate-button" href="/chatbot">
+            <i class="fa-solid fa-gear"></i>
+            <span>Configurar Chatbot</span>
+          </a>
+        </section>
+
+        <div class="queue-requires-chatbot filas-active-content">
+          <section class="filas-metrics" aria-label="Resumo das filas">
+            <article class="filas-metric-card">
+              <span>Total de filas</span>
+              <strong id="metricTotal">0</strong>
+            </article>
+            <article class="filas-metric-card">
+              <span>Filas ativas</span>
+              <strong id="metricAtivas">0</strong>
+            </article>
+            <article class="filas-metric-card">
+              <span>Alta prioridade</span>
+              <strong id="metricAlta">0</strong>
+            </article>
+            <article class="filas-metric-card">
+              <span>Retorno médio</span>
+              <strong id="metricSla">--</strong>
+            </article>
+          </section>
+
+          <section class="filter-card filas-filter-card" aria-label="Filas configuradas">
+            <div class="filas-section-head">
+              <div>
+                <h2>Filas configuradas</h2>
+                <p>Gerencie a espera, prioridade e o retorno automático de cada departamento.</p>
+              </div>
+              <span class="filas-count-pill"><strong id="totalFilas">0</strong> cadastradas</span>
+            </div>
+
+            <div class="dept-toolbar filas-toolbar">
+              <label class="dept-search filas-search" for="buscaFila">
+                <i class="fa-solid fa-magnifying-glass"></i>
+                <input id="buscaFila" type="search" placeholder="Buscar fila ou departamento..." autocomplete="off"/>
+              </label>
+
+              <div class="filter-actions">
+                <select id="filtroStatus" class="select">
+                  <option value="">Status: Todos</option>
+                  <option value="ativa">Somente ativas</option>
+                  <option value="inativa">Somente inativas</option>
+                </select>
+
+                <select id="filtroPrioridade" class="select">
+                  <option value="">Prioridade: Todas</option>
+                  <option value="baixa">Baixa</option>
+                  <option value="normal">Normal</option>
+                  <option value="alta">Alta</option>
+                  <option value="urgente">Urgente</option>
+                </select>
+              </div>
+            </div>
+          </section>
+
+          <section class="stack filas-stack-wrap" aria-label="Lista de filas">
+            <div id="tabelaFilas" class="filas-stack"></div>
+
+            <div id="emptyFilas" class="empty filas-empty">
+              <div class="empty-icon"><i class="fa-solid fa-inbox"></i></div>
+              <h3>Nenhuma fila criada ainda</h3>
+              <p>Crie uma fila para um departamento configurado no Chatbot.</p>
+              <button id="btnNovaFilaEmpty" class="btn btn-primary" type="button">
+                <i class="fa-solid fa-plus"></i>
+                <span>Criar primeira fila</span>
+              </button>
+            </div>
+          </section>
+        </div>
       </div>
-    </div>
 
-    <section class="summary-card" aria-label="Resumo das filas">
-      <div class="summary-head">
-        <div>
-          <h3>
-            <i class="fa-solid fa-diagram-project"></i>
-            Resumo da operação
-          </h3>
-          <p>Visão rápida das filas disponíveis para organização do atendimento.</p>
-        </div>
+      <aside class="filas-aside" aria-label="Resumo da configuração">
+        <section class="filas-side-card">
+          <header class="filas-side-head">
+            <div>
+              <h2>Resumo da configuração</h2>
+              <p>Status atual das filas e do Chatbot.</p>
+            </div>
+            <span id="filasContextPill" class="filas-status-pill is-waiting">Aguardando</span>
+          </header>
 
-        <div class="summary-badges">
-          <span class="summary-chip"><strong id="totalFilas">--</strong> filas cadastradas</span>
-        </div>
-      </div>
+          <div class="filas-summary-list">
+            <div><span>WhatsApps com Chatbot</span><strong id="filasSummaryInstances">0</strong></div>
+            <div><span>Departamentos disponíveis</span><strong id="filasSummaryDepartments">0</strong></div>
+            <div><span>Filas criadas</span><strong id="filasSummaryTotal">0</strong></div>
+            <div><span>Filas ativas</span><strong id="filasSummaryActive">0</strong></div>
+            <div class="filas-summary-status"><span>Status</span><strong id="filasSummaryStatus"><i></i>Aguardando Chatbot</strong></div>
+          </div>
+        </section>
 
-      <div class="summary-grid">
-        <div class="summary-box">
-          <div class="k">Total de filas</div>
-          <div class="v" id="metricTotal">0</div>
-        </div>
+        <section class="filas-side-card filas-getting-started">
+          <header class="filas-side-head">
+            <div>
+              <h2>Como começar</h2>
+              <p>Três passos para colocar as filas em operação.</p>
+            </div>
+          </header>
 
-        <div class="summary-box">
-          <div class="k">Filas ativas</div>
-          <div class="v" id="metricAtivas">0</div>
-        </div>
+          <ol class="filas-steps">
+            <li>
+              <span>1</span>
+              <div><strong>Configure o Chatbot</strong><p>Ative o menu de departamentos em pelo menos um WhatsApp.</p></div>
+            </li>
+            <li>
+              <span>2</span>
+              <div><strong>Crie sua primeira fila</strong><p>Escolha o departamento e defina o tempo para retorno automático.</p></div>
+            </li>
+            <li>
+              <span>3</span>
+              <div><strong>Atenda normalmente</strong><p>Se ninguém responder no prazo, a conversa volta para a fila.</p></div>
+            </li>
+          </ol>
 
-        <div class="summary-box">
-          <div class="k">Alta prioridade</div>
-          <div class="v" id="metricAlta">0</div>
-        </div>
-
-        <div class="summary-box">
-          <div class="k">SLA médio</div>
-          <div class="v" id="metricSla">--</div>
-        </div>
-      </div>
-    </section>
-
-    <section class="filter-card" aria-label="Filtros de filas">
-      <div class="filter-head">
-        <div>
-          <h2>Filas configuradas</h2>
-          <p>Crie as opções que depois aparecem no fluxo do chatbot e organizam a equipe.</p>
-        </div>
-      </div>
-
-      <div class="dept-toolbar">
-        <label class="dept-search" for="buscaFila">
-          <i class="fa-solid fa-magnifying-glass"></i>
-          <input
-            id="buscaFila"
-            type="search"
-            placeholder="Buscar fila, descrição, departamento ou mensagem..."
-            autocomplete="off"
-          />
-        </label>
-
-        <div class="filter-actions">
-          <select id="filtroStatus" class="select">
-            <option value="">Status: Todos</option>
-            <option value="ativa">Somente ativas</option>
-            <option value="inativa">Somente inativas</option>
-          </select>
-
-          <select id="filtroPrioridade" class="select">
-            <option value="">Prioridade: Todas</option>
-            <option value="baixa">Baixa</option>
-            <option value="normal">Normal</option>
-            <option value="alta">Alta</option>
-            <option value="urgente">Urgente</option>
-          </select>
-        </div>
-      </div>
-    </section>
-
-    <section class="stack filas-stack-wrap" aria-label="Lista de filas">
-      <div id="tabelaFilas" class="filas-stack"></div>
-
-      <div id="emptyFilas" class="empty">
-        <div class="empty-icon">
-          <i class="fa-solid fa-inbox"></i>
-        </div>
-        <h3>Nenhuma fila encontrada</h3>
-        <p>Crie uma fila para aparecer como opção no menu do chatbot.</p>
-        <button id="btnNovaFilaEmpty" class="btn primary" type="button">
-          <i class="fa-solid fa-plus"></i>
-          Criar primeira fila
-        </button>
-      </div>
+          <div id="filasReadyNote" class="filas-ready-note is-waiting">
+            <i class="fa-solid fa-circle-info"></i>
+            <span>Configure o Chatbot para liberar as filas.</span>
+          </div>
+        </section>
+      </aside>
     </section>
   </main>
 
@@ -173,7 +259,7 @@
             <i class="fa-solid fa-list-check"></i>
             <span id="modalFilaTitulo">Nova fila</span>
           </div>
-          <p>Configure como essa fila será usada para organizar o atendimento.</p>
+          <p>Defina onde a conversa aguarda e em quanto tempo ela volta para a equipe se ficar sem resposta.</p>
         </div>
 
         <button id="btnFecharModalFila" class="btn-close" type="button" aria-label="Fechar modal">
@@ -187,9 +273,29 @@
         <div class="modal-mini-note">
           <i class="fa-solid fa-route"></i>
           <div>
-            <strong>O que essa fila faz?</strong>
-            <span>Quando o cliente escolher essa opção no chatbot, a conversa fica organizada nessa fila para a equipe atender melhor.</span>
+            <strong>Como funciona?</strong>
+            <span>O Chatbot envia o cliente para um departamento. A fila mantém a conversa disponível até alguém atender e pode devolvê-la automaticamente se o responsável não responder.</span>
           </div>
+        </div>
+
+        <div class="form-section-title">
+          <span>Origem no Chatbot</span>
+        </div>
+
+        <div class="queue-scope-grid">
+          <div class="fi full-width">
+            <span>WhatsApp(s) com Chatbot ativo <span class="req">*</span></span>
+            <div id="filaInstancias" class="queue-check-list" role="group" aria-label="WhatsApps com Chatbot ativo"></div>
+            <small>Marque os números em que esta fila deve funcionar.</small>
+          </div>
+
+          <label class="fi full-width">
+            <span>Departamento do Chatbot <span class="req">*</span></span>
+            <select id="filaDepartamento" class="select" required>
+              <option value="">Selecione primeiro o WhatsApp</option>
+            </select>
+            <small>Só aparecem departamentos habilitados no Chatbot para todos os WhatsApps marcados.</small>
+          </label>
         </div>
 
         <div class="form-section-title">
@@ -213,13 +319,14 @@
           </label>
 
           <label class="fi">
-            <span>Tempo ideal de resposta</span>
+            <span>Tempo sem resposta</span>
             <select id="filaSla" class="select">
-              <option value="5">Até 5 minutos</option>
-              <option value="10" selected>Até 10 minutos</option>
-              <option value="15">Até 15 minutos</option>
-              <option value="30">Até 30 minutos</option>
-              <option value="60">Até 1 hora</option>
+              <option value="5" selected>5 minutos</option>
+              <option value="10">10 minutos</option>
+              <option value="15">15 minutos</option>
+              <option value="30">30 minutos</option>
+              <option value="60">1 hora</option>
+              <option value="custom">Personalizado</option>
             </select>
           </label>
 
@@ -263,6 +370,35 @@
             Prévia no atendimento
           </div>
           <pre id="filaPreviewText" class="preview-pre">A mensagem padrão aparecerá aqui.</pre>
+        </div>
+
+        <div class="form-section-title">
+          <span>Retorno automático</span>
+        </div>
+
+        <label class="switch-line queue-timeout-switch">
+          <div class="switch-info">
+            <strong>Voltar para a fila se o atendente não responder</strong>
+            <span>O prazo começa ao assumir e começa novamente quando o cliente mandar uma nova mensagem sem resposta.</span>
+          </div>
+          <label class="tswitch" id="swFilaRetorno" data-on="true" tabindex="0" aria-pressed="true">
+            <input id="filaRetornoAtivo" type="checkbox" checked aria-label="Ativar retorno automático para a fila">
+            <span class="track"></span>
+            <span class="label off">off</span>
+            <span class="label on">on</span>
+            <span class="knob"></span>
+          </label>
+        </label>
+
+        <label id="filaRetornoCustomWrap" class="fi full-width" hidden>
+          <span>Tempo personalizado em minutos</span>
+          <input id="filaRetornoCustom" class="input" type="number" min="1" max="1440" value="5" inputmode="numeric">
+          <small>Use um valor entre 1 minuto e 24 horas.</small>
+        </label>
+
+        <div class="queue-system-note">
+          <i class="fa-solid fa-clock-rotate-left"></i>
+          <span>Quando o prazo vencer, o responsável é removido, a conversa volta para a fila do mesmo departamento e o motivo aparece como evento interno no chat.</span>
         </div>
 
         <div class="form-section-title">
@@ -312,7 +448,7 @@
             <i class="fa-solid fa-circle-question"></i>
             Como as filas funcionam
           </h2>
-          <p>Entenda em poucos passos como o cliente sai do chatbot e chega organizado para sua equipe.</p>
+          <p>Veja como o Chatbot, o departamento e o retorno automático trabalham juntos.</p>
         </div>
 
         <button type="button" class="help-close" data-close-modal="filasHelpModal" aria-label="Fechar">
@@ -348,10 +484,10 @@
               <div class="slide-icon">
                 <i class="fa-solid fa-inbox"></i>
               </div>
-              <h3>A conversa entra na fila certa</h3>
+              <h3>A conversa aguarda no departamento</h3>
               <p>
-                A conversa fica marcada com a fila escolhida. Assim a equipe já sabe
-                qual assunto o cliente quer tratar.
+                Depois da escolha no Chatbot, a conversa entra na fila configurada para aquele departamento
+                e fica disponível para os atendentes autorizados.
               </p>
               <div class="slide-card-demo">
                 <span class="status-pill is-active">Suporte</span>
@@ -365,15 +501,15 @@
               <div class="slide-icon">
                 <i class="fa-solid fa-headset"></i>
               </div>
-              <h3>O atendente assume</h3>
+              <h3>O atendente assume e o prazo começa</h3>
               <p>
-                O operador vê a fila, prioridade e tempo ideal de resposta.
-                Isso evita bagunça, conversa perdida e cliente sem retorno.
+                Quando Amanda clica em Atender, ela vira a responsável. Se a fila estiver configurada para 5 minutos,
+                ela precisa responder dentro desse prazo.
               </p>
               <div class="slide-card-demo">
-                <span class="prio-pill prio-normal">SLA até 10 min</span>
-                <strong>Atendente assume a conversa</strong>
-                <small>Histórico, status e responsável ficam organizados.</small>
+                <span class="prio-pill prio-normal">Retorno em 5 min</span>
+                <strong>Amanda assumiu a conversa</strong>
+                <small>Ao responder, o prazo para. Se o cliente falar de novo, ele começa novamente.</small>
               </div>
             </article>
 
@@ -382,13 +518,15 @@
               <div class="slide-icon">
                 <i class="fa-regular fa-message"></i>
               </div>
-              <h3>Mensagem padrão confirma para o cliente</h3>
+              <h3>Sem resposta, volta para a fila</h3>
               <p>
-                Você pode deixar uma mensagem pronta para avisar que o cliente entrou
-                na fila e será atendido em instantes.
+                Se o prazo vencer sem resposta, Amanda deixa de ser responsável e Vitória ou outra pessoa do mesmo departamento pode atender.
+                O ZapsChat registra o retorno como evento interno no histórico.
               </p>
-              <div class="chat-demo">
-                <div class="bot-msg">Você entrou na fila de Suporte. Em instantes nossa equipe irá te atender.</div>
+              <div class="slide-card-demo">
+                <span class="status-pill is-active">De volta à fila</span>
+                <strong>Conversa disponível novamente</strong>
+                <small>Evento interno: “Conversa devolvida para a fila por inatividade do atendente.”</small>
               </div>
             </article>
           </div>
@@ -410,8 +548,7 @@
         </div>
 
         <div class="help-note">
-          <strong>Resumo:</strong> fila é o caminho que organiza o cliente depois da escolha no chatbot.
-          Ela ajuda sua equipe a saber quem atende, qual assunto é e qual prioridade seguir.
+          <strong>Resumo:</strong> fila é a área de espera do departamento. Ela só funciona quando o Chatbot de departamentos está ativo e pode devolver automaticamente uma conversa sem resposta para outro atendente assumir.
         </div>
 
         <div class="help-footer">

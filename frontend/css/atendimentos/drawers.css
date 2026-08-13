@@ -73,6 +73,35 @@ html[data-theme="light"] .ag-item:hover{ background:#f4f4f5; }
 .ag-phone{ font-size:12px; color:#9aa7ad; }
 .ag-empty{ padding:16px; text-align:center; color:#9aa7ad; }
 
+.ag-loading-state{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:8px;
+  padding:12px 8px 10px;
+  color:#9aa7ad;
+  font-size:12px;
+  line-height:1.35;
+}
+
+.ag-loading-state--more{
+  padding:14px 8px 18px;
+}
+
+.ag-loading-spinner{
+  width:15px;
+  height:15px;
+  flex:0 0 15px;
+  border-radius:999px;
+  border:2px solid color-mix(in oklab,var(--border,#2a3942) 88%,transparent);
+  border-top-color:var(--accent,#00a884);
+  animation:ag-loading-spin .72s linear infinite;
+}
+
+@keyframes ag-loading-spin{
+  to{ transform:rotate(360deg); }
+}
+
 /* Skeleton agenda */
 .ag-skel{
   display:flex; align-items:center; gap:10px;
@@ -572,6 +601,19 @@ html[data-theme="light"] .ag-skel .line{
 #ncDrawer .nc-save:disabled{
   opacity:.58;
   cursor:not-allowed;
+}
+
+#ncDrawer .nc-save.is-loading{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:8px;
+  min-width:156px;
+}
+
+#ncDrawer .nc-save.is-loading .fa-spinner{
+  flex:0 0 auto;
+  font-size:13px;
 }
 
 #ncDrawer .nc-cancel{

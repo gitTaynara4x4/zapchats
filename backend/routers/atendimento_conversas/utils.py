@@ -219,6 +219,8 @@ def _default_fila_state() -> Dict[str, Any]:
         "fila_ativa": False,
         "fila_exigir_aceite": False,
         "fila_escolhida_em": None,
+        "retorno_inatividade_ativo": False,
+        "retorno_inatividade_minutos": None,
         "exigir_aceite": False,
         "aceite_obrigatorio": False,
         "aguardando_aceite": False,
@@ -247,6 +249,31 @@ def _fila_state_for_atendimento(
 
     fila_id = _to_int(getattr(atendimento, "fila_id", None))
     if fila_id is None:
+        return state
+
+    # Fila operacional só existe enquanto o Chatbot de departamentos estiver
+    # ligado para o WhatsApp desta conversa. Isso também esconde estados legados
+    # sem precisar esperar uma limpeza no banco.
+    try:
+        from backend.services.chatbot_claim_policy import department_chatbot_active_for_department
+
+        empresa_id = _to_int(getattr(atendimento, "empresa_id", None))
+        instancia_id = _to_int(getattr(atendimento, "instancia_id", None))
+        departamento_id = _to_int(getattr(atendimento, "departamento_id", None))
+        if (
+            empresa_id is None
+            or instancia_id is None
+            or departamento_id is None
+            or not department_chatbot_active_for_department(
+                db,
+                empresa_id=int(empresa_id),
+                instancia_id=int(instancia_id),
+                departamento_id=int(departamento_id),
+            )
+        ):
+            return state
+    except Exception:
+        # Fail closed: se não foi possível validar o Chatbot, não exibe fila.
         return state
 
     state["fila_id"] = int(fila_id)
@@ -281,6 +308,8 @@ def _fila_state_for_atendimento(
             "fila_cor": getattr(fila, "cor", None),
             "fila_ativa": bool(getattr(fila, "ativa", False)),
             "fila_exigir_aceite": exigir,
+            "retorno_inatividade_ativo": bool(getattr(fila, "retorno_inatividade_ativo", False)),
+            "retorno_inatividade_minutos": getattr(fila, "retorno_inatividade_minutos", None),
             "exigir_aceite": exigir,
             "aceite_obrigatorio": exigir,
             "pode_responder": not exigir,

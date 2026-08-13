@@ -83,6 +83,60 @@ def department_chatbot_active(
     )
 
 
+def department_chatbot_active_for_department(
+    db: Session,
+    *,
+    empresa_id: int,
+    instancia_id: Optional[int],
+    departamento_id: Optional[int],
+) -> bool:
+    """Chatbot de departamentos ligado E departamento disponível no menu."""
+    iid = _to_int(instancia_id)
+    did = _to_int(departamento_id)
+    if iid is None or did is None:
+        return False
+
+    try:
+        row = (
+            db.query(models.ChatbotConfig)
+            .filter(
+                models.ChatbotConfig.empresa_id == int(empresa_id),
+                models.ChatbotConfig.instancia_id == int(iid),
+                models.ChatbotConfig.ativo.is_(True),
+            )
+            .first()
+        )
+    except Exception:
+        return False
+
+    if row is None:
+        return False
+    feature = _department_feature(getattr(row, "config", None))
+    welcome = feature.get("welcome") or {}
+    if not bool(feature.get("enabled", False) and isinstance(welcome, dict) and welcome.get("enabled", False)):
+        return False
+
+    # Sem configuração item a item, o runtime do Chatbot considera todos os
+    # departamentos ativos da empresa disponíveis.
+    items = feature.get("items")
+    if not isinstance(items, dict) or not items:
+        try:
+            return bool(
+                db.query(models.Departamento.id)
+                .filter(
+                    models.Departamento.empresa_id == int(empresa_id),
+                    models.Departamento.id == int(did),
+                    models.Departamento.ativo.is_(True),
+                )
+                .first()
+            )
+        except Exception:
+            return False
+
+    item = items.get(str(did)) or items.get(did) or {}
+    return bool(isinstance(item, dict) and item.get("enabled", False))
+
+
 def department_acl_enabled(
     db: Session,
     *,
@@ -323,11 +377,14 @@ def release_unassigned_department_claims(
     instancia_id: int,
 ) -> List[Dict[str, Any]]:
     """
-    Libera conversas antigas do menu quando ele é desligado.
+    Desliga o estado de fila/aceite das conversas quando o menu de departamentos
+    é desligado para a instância.
 
-    Mantém departamento e visibilidade, mas muda o atendimento sem responsável
-    para ``novo``. Assim pode ser respondido diretamente e não volta a exigir
-    aceite quando o chatbot for ligado novamente.
+    Regras:
+    - fila só existe enquanto o chatbot de departamentos está ativo;
+    - conversa sem responsável vira atendimento normal (status ``novo``);
+    - conversa já assumida continua com o responsável atual, mas sem fila;
+    - nenhum histórico é apagado.
     """
     marker_filter = or_(
         models.Cliente.triagem_tentativas > 0,
@@ -337,16 +394,11 @@ def release_unassigned_department_claims(
 
     rows = (
         db.query(models.Atendimento, models.Cliente)
-        .join(
-            models.Cliente,
-            models.Cliente.id == models.Atendimento.cliente_id,
-        )
+        .join(models.Cliente, models.Cliente.id == models.Atendimento.cliente_id)
         .filter(
             models.Atendimento.empresa_id == int(empresa_id),
             models.Atendimento.instancia_id == int(instancia_id),
-            models.Atendimento.operador_id.is_(None),
             models.Atendimento.departamento_id.is_not(None),
-            models.Atendimento.fila_id.is_(None),
             models.Atendimento.status.in_(_open_status_values()),
             models.Cliente.empresa_id == int(empresa_id),
             marker_filter,
@@ -364,44 +416,72 @@ def release_unassigned_department_claims(
         if not customer_has_department_triage_marker(cliente, departamento_id):
             continue
 
-        _deactivate_participants_in_savepoint(
-            db,
-            empresa_id=int(empresa_id),
-            atendimento_id=int(atendimento.id),
-            now=now,
-        )
+        operador_id = _to_int(getattr(atendimento, "operador_id", None))
+        had_queue = _to_int(getattr(atendimento, "fila_id", None)) is not None
 
-        atendimento.operador_id = None
-        atendimento.status = _status_novo()
-        if hasattr(atendimento, "aceito_em"):
-            atendimento.aceito_em = None
+        # Com o Chatbot OFF, a conversa não pode continuar exibindo estado de fila.
+        atendimento.fila_id = None
+        atendimento.fila_escolhida_em = None
+
+        if operador_id is None:
+            _deactivate_participants_in_savepoint(
+                db,
+                empresa_id=int(empresa_id),
+                atendimento_id=int(atendimento.id),
+                now=now,
+            )
+            atendimento.operador_id = None
+            atendimento.status = _status_novo()
+            if hasattr(atendimento, "aceito_em"):
+                atendimento.aceito_em = None
+            status_out = "novo"
+            pode_responder = True
+            participantes = []
+            participantes_ids = []
+        else:
+            # Atendimento já assumido continua com quem está atendendo; apenas a
+            # camada de fila some. O cronômetro também deixa de valer.
+            status_out = _status_norm(getattr(atendimento, "status", None)) or "em_atendimento"
+            pode_responder = True
+            participantes = []
+            participantes_ids = []
+
         if hasattr(atendimento, "atualizado_em"):
             atendimento.atualizado_em = now
         db.add(atendimento)
 
-        released.append(
-            {
-                "cliente_id": int(atendimento.cliente_id),
-                "instancia_id": int(instancia_id),
-                "atendimento_id": int(atendimento.id),
-                "departamento_id": departamento_id,
-                "operador_id": None,
-                "responsavel_id": None,
-                "status": "novo",
-                "claim_mode": None,
-                "departamento_claim": False,
-                "exigir_aceite": False,
-                "aceite_obrigatorio": False,
-                "aguardando_aceite": False,
-                "pode_aceitar": False,
-                "pode_liberar": False,
-                "pode_responder": True,
-                "aceita_por_mim": False,
-                "participantes": [],
-                "participantes_ids": [],
-                "tem_participantes": False,
-            }
-        )
+        # Mesmo uma conversa assumida precisa de WS se tinha fila, para o badge e
+        # o cronômetro sumirem sem F5.
+        if operador_id is None or had_queue:
+            released.append(
+                {
+                    "cliente_id": int(atendimento.cliente_id),
+                    "instancia_id": int(instancia_id),
+                    "atendimento_id": int(atendimento.id),
+                    "departamento_id": departamento_id,
+                    "operador_id": int(operador_id) if operador_id is not None else None,
+                    "responsavel_id": int(operador_id) if operador_id is not None else None,
+                    "status": status_out,
+                    "claim_mode": None,
+                    "departamento_claim": bool(operador_id is not None),
+                    "fila_id": None,
+                    "fila_nome": None,
+                    "fila_ativa": False,
+                    "fila_exigir_aceite": False,
+                    "retorno_inatividade_ativo": False,
+                    "retorno_inatividade_minutos": None,
+                    "exigir_aceite": bool(operador_id is not None),
+                    "aceite_obrigatorio": bool(operador_id is not None),
+                    "aguardando_aceite": False,
+                    "pode_aceitar": False,
+                    "pode_liberar": bool(operador_id is not None),
+                    "pode_responder": pode_responder,
+                    "aceita_por_mim": False,
+                    "participantes": participantes,
+                    "participantes_ids": participantes_ids,
+                    "tem_participantes": bool(participantes_ids),
+                }
+            )
 
     db.flush()
     return released
@@ -412,6 +492,7 @@ __all__ = [
     "department_acl_enabled",
     "department_acl_instancia_ids",
     "department_chatbot_active",
+    "department_chatbot_active_for_department",
     "department_claim_required",
     "release_unassigned_department_claims",
 ]

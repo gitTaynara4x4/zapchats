@@ -89,7 +89,15 @@
     if (!head) return null;
 
     let el = document.getElementById('inst-badge');
-    if (el) return el;
+    if (el) {
+      const title = document.getElementById('chat-title');
+      const row = title?.parentNode;
+      const participants = document.getElementById('zc-chat-participants');
+      if (row && el.parentElement === row && participants?.parentElement === row && el.nextElementSibling !== participants) {
+        row.insertBefore(el, participants);
+      }
+      return el;
+    }
 
     el = document.createElement('div');
     el.id = 'inst-badge';
@@ -97,8 +105,12 @@
     el.innerHTML = `<span class="dot"></span><span id="inst-badge-text">WhatsApp: —</span>`;
 
     const title = document.getElementById('chat-title');
-    if (title && title.parentNode) title.parentNode.appendChild(el);
-    else head.appendChild(el);
+    if (title && title.parentNode) {
+      const row = title.parentNode;
+      const participants = document.getElementById('zc-chat-participants');
+      if (participants && participants.parentElement === row) row.insertBefore(el, participants);
+      else row.appendChild(el);
+    } else head.appendChild(el);
 
     return el;
   }
@@ -728,9 +740,13 @@
     wrap.appendChild(label);
 
     const loading = document.createElement('div');
-    loading.className = 'inst-empty';
-    loading.textContent = 'Carregando WhatsApps...';
-    loading.style.cssText = 'font-size:.85rem;opacity:.75;padding:.35rem .5rem;';
+    loading.className = 'inst-empty inst-loading-state';
+    loading.setAttribute('role', 'status');
+    loading.setAttribute('aria-live', 'polite');
+    loading.innerHTML = `
+      <span class="inst-loading-spinner" aria-hidden="true"></span>
+      <span>Carregando WhatsApps...</span>
+    `;
     wrap.appendChild(loading);
   }
 

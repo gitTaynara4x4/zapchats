@@ -250,6 +250,10 @@
       }
 
       #${MODAL_ID} .zc-transfer-dep-btn-primary{
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+        gap:8px;
         background:#25d366;
         color:#0b141a;
       }
@@ -257,6 +261,20 @@
       #${MODAL_ID} .zc-transfer-dep-btn-primary:disabled{
         opacity:.65;
         cursor:wait;
+      }
+
+      #${MODAL_ID} .zc-transfer-dep-spinner{
+        width:14px;
+        height:14px;
+        flex:0 0 14px;
+        border-radius:999px;
+        border:2px solid rgba(11,20,26,.24);
+        border-top-color:currentColor;
+        animation:zc-transfer-dep-spin .72s linear infinite;
+      }
+
+      @keyframes zc-transfer-dep-spin{
+        to{ transform:rotate(360deg); }
       }
     `;
     document.head.appendChild(style);
@@ -327,6 +345,43 @@
     error.classList.add("is-visible");
   }
 
+  function setTransferLoading(loading) {
+    const { modal, select, submit } = getModalEls();
+    if (!submit) return;
+
+    if (!submit.dataset.defaultHtml) {
+      submit.dataset.defaultHtml = submit.innerHTML || "Transferir";
+    }
+
+    submit.disabled = Boolean(loading);
+    submit.classList.toggle("is-loading", Boolean(loading));
+
+    if (loading) {
+      submit.setAttribute("aria-busy", "true");
+      submit.innerHTML = `
+        <span class="zc-transfer-dep-spinner" aria-hidden="true"></span>
+        <span>Transferindo...</span>
+      `;
+
+      if (select) {
+        select.dataset.wasDisabledBeforeTransfer = select.disabled ? "1" : "0";
+        select.disabled = true;
+      }
+    } else {
+      submit.removeAttribute("aria-busy");
+      submit.innerHTML = submit.dataset.defaultHtml || "Transferir";
+
+      if (select && select.dataset.wasDisabledBeforeTransfer != null) {
+        select.disabled = select.dataset.wasDisabledBeforeTransfer === "1";
+        delete select.dataset.wasDisabledBeforeTransfer;
+      }
+    }
+
+    modal?.querySelectorAll("[data-close-transfer-modal]").forEach((button) => {
+      button.disabled = Boolean(loading);
+    });
+  }
+
   function openModal() {
     const { modal } = getModalEls();
     if (!modal) return;
@@ -335,11 +390,11 @@
   }
 
   function closeModal() {
-    const { modal, submit } = getModalEls();
+    const { modal } = getModalEls();
     if (!modal) return;
+    setTransferLoading(false);
     modal.classList.remove("is-open");
     modal.setAttribute("aria-hidden", "true");
-    if (submit) submit.disabled = false;
     setError("");
   }
 
@@ -477,7 +532,7 @@
 
     try {
       setError("");
-      if (submit) submit.disabled = true;
+      setTransferLoading(true);
 
       const payload = {
         empresa_id: empresaId,
@@ -541,8 +596,8 @@
         try { await window.carregarClientes(); } catch (_) {}
       }
     } catch (err) {
+      setTransferLoading(false);
       setError(err?.message || "Falha ao transferir a conversa.");
-      if (submit) submit.disabled = false;
     }
   }
 

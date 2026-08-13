@@ -42,6 +42,11 @@
   const __metaRequestVersionByKey = new Map();
   const __metaMutationVersionByKey = new Map();
 
+  // Pessoas atualmente dentro da conversa (responsável + participantes).
+  // Renderizado na mesma linha do nome/instância, sem MutationObserver.
+  const PARTICIPANTS_VISIBLE_LIMIT = 3;
+  let __participantsOutsideBound = false;
+
   function isAtendimentoLeaving() {
     try {
       return Boolean(
@@ -138,6 +143,245 @@
     }
 
     return null;
+  }
+
+  function participantFirstName(name, fallback = "Colaborador") {
+    const clean = String(name || "").trim();
+    return clean ? clean.split(/\s+/)[0] : fallback;
+  }
+
+  function participantInitials(name) {
+    const parts = String(name || "").trim().split(/\s+/).filter(Boolean);
+    if (!parts.length) return "?";
+    const first = parts[0]?.[0] || "";
+    const last = parts.length > 1 ? (parts[parts.length - 1]?.[0] || "") : "";
+    return `${first}${last}`.toUpperCase().slice(0, 2);
+  }
+
+  function participantTone(id) {
+    const n = Math.abs(Number(id || 0)) || 1;
+    const tones = [
+      ["#e8f5ef", "#176b4b", "#c8e8da"],
+      ["#eef3ff", "#3558a8", "#d7e1fb"],
+      ["#fff3e6", "#9a5b19", "#f2dcc3"],
+      ["#f4efff", "#6748a2", "#e2d6f7"],
+      ["#eef7f8", "#317078", "#d2e8eb"],
+    ];
+    return tones[n % tones.length];
+  }
+
+  function normalizeParticipants(meta) {
+    const source = Array.isArray(meta?.participantes)
+      ? meta.participantes
+      : (Array.isArray(meta?.raw?.participantes) ? meta.raw.participantes : []);
+
+    const responsavelId = toInt(meta?.responsavel_id) ?? toInt(meta?.operador_id);
+    const responsavelNome = meta?.responsavel_nome || meta?.operador_nome || null;
+    const seen = new Set();
+    const out = [];
+
+    for (const raw of source) {
+      const id = toInt(raw?.colaborador_id ?? raw?.id);
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      out.push({
+        id,
+        nome: String(raw?.nome || raw?.colaborador_nome || `Colaborador ${id}`).trim(),
+        is_responsavel: Boolean(raw?.is_responsavel || (responsavelId && id === responsavelId)),
+      });
+    }
+
+    if (responsavelId && !seen.has(responsavelId)) {
+      out.unshift({
+        id: responsavelId,
+        nome: String(responsavelNome || `Colaborador ${responsavelId}`).trim(),
+        is_responsavel: true,
+      });
+    }
+
+    out.sort((a, b) => Number(b.is_responsavel) - Number(a.is_responsavel));
+    return out;
+  }
+
+  function ensureParticipantsUi() {
+    const titleRow = document.querySelector('#chat-header .chat-contact-title-row');
+    if (!titleRow) return null;
+
+    let root = document.getElementById('zc-chat-participants');
+    if (root && root.parentElement !== titleRow) root.remove();
+
+    if (root) {
+      const instBadge = document.getElementById('inst-badge');
+      if (instBadge && instBadge.parentElement === titleRow && instBadge.nextElementSibling !== root) {
+        instBadge.insertAdjacentElement('afterend', root);
+      }
+    }
+
+    if (!root) {
+      root = document.createElement('div');
+      root.id = 'zc-chat-participants';
+      root.className = 'zc-chat-participants';
+      root.hidden = true;
+      root.setAttribute('aria-label', 'Pessoas nesta conversa');
+
+      const summary = document.createElement('button');
+      summary.type = 'button';
+      summary.className = 'zc-chat-participants-summary';
+      summary.setAttribute('aria-expanded', 'false');
+      summary.setAttribute('aria-haspopup', 'dialog');
+      summary.title = 'Ver pessoas nesta conversa';
+
+      const list = document.createElement('div');
+      list.className = 'zc-chat-participants-popover';
+      list.hidden = true;
+      list.setAttribute('role', 'dialog');
+      list.setAttribute('aria-label', 'Pessoas nesta conversa');
+
+      root.append(summary, list);
+
+      // Fica sempre depois do badge da instância. Se a instância ainda não
+      // tiver sido criada, o módulo inst-switch reposiciona o badge antes daqui.
+      const instBadge = document.getElementById('inst-badge');
+      if (instBadge && instBadge.parentElement === titleRow) {
+        instBadge.insertAdjacentElement('afterend', root);
+      } else {
+        titleRow.appendChild(root);
+      }
+
+      summary.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        const opening = list.hidden;
+        document.querySelectorAll('.zc-chat-participants-popover').forEach((el) => {
+          if (el !== list) el.hidden = true;
+        });
+        list.hidden = !opening;
+        summary.setAttribute('aria-expanded', opening ? 'true' : 'false');
+      });
+
+      if (!__participantsOutsideBound) {
+        __participantsOutsideBound = true;
+        document.addEventListener('click', (ev) => {
+          const current = document.getElementById('zc-chat-participants');
+          if (!current || current.contains(ev.target)) return;
+          const pop = current.querySelector('.zc-chat-participants-popover');
+          const btn = current.querySelector('.zc-chat-participants-summary');
+          if (pop) pop.hidden = true;
+          if (btn) btn.setAttribute('aria-expanded', 'false');
+        }, true);
+      }
+    }
+
+    return root;
+  }
+
+  function makeParticipantAvatar(person, large = false) {
+    const avatar = document.createElement('span');
+    avatar.className = `zc-participant-avatar${large ? ' is-large' : ''}${person.is_responsavel ? ' is-responsavel' : ''}`;
+    avatar.textContent = participantInitials(person.nome);
+    avatar.setAttribute('aria-hidden', 'true');
+    const [bg, fg, ring] = participantTone(person.id);
+    avatar.style.setProperty('--zc-pa-bg', bg);
+    avatar.style.setProperty('--zc-pa-fg', fg);
+    avatar.style.setProperty('--zc-pa-ring', ring);
+    return avatar;
+  }
+
+  function clearParticipantsUi() {
+    const root = document.getElementById('zc-chat-participants');
+    if (!root) return;
+    root.hidden = true;
+    root.dataset.conversationKey = '';
+    const summary = root.querySelector('.zc-chat-participants-summary');
+    const pop = root.querySelector('.zc-chat-participants-popover');
+    if (summary) {
+      summary.replaceChildren();
+      summary.setAttribute('aria-expanded', 'false');
+    }
+    if (pop) {
+      pop.replaceChildren();
+      pop.hidden = true;
+    }
+  }
+
+  function renderParticipantsFromMeta(conv, meta) {
+    if (!conv || conv.is_group || !meta) {
+      clearParticipantsUi();
+      return;
+    }
+
+    const people = normalizeParticipants(meta);
+    if (!people.length) {
+      clearParticipantsUi();
+      return;
+    }
+
+    const root = ensureParticipantsUi();
+    if (!root) return;
+    const summary = root.querySelector('.zc-chat-participants-summary');
+    const pop = root.querySelector('.zc-chat-participants-popover');
+    if (!summary || !pop) return;
+
+    const key = buildConversationKey(conv);
+    root.dataset.conversationKey = key;
+    root.hidden = false;
+    summary.replaceChildren();
+    pop.replaceChildren();
+    pop.hidden = true;
+    summary.setAttribute('aria-expanded', 'false');
+
+    const avatars = document.createElement('span');
+    avatars.className = 'zc-chat-participants-avatars';
+
+    const visible = people.slice(0, PARTICIPANTS_VISIBLE_LIMIT);
+    visible.forEach((person) => {
+      const chip = document.createElement('span');
+      chip.className = `zc-participant-chip${person.is_responsavel ? ' is-responsavel' : ''}`;
+      chip.title = person.is_responsavel
+        ? `${person.nome} — responsável principal`
+        : `${person.nome} — participando`;
+      chip.setAttribute('aria-label', chip.title);
+      chip.appendChild(makeParticipantAvatar(person));
+      avatars.appendChild(chip);
+    });
+
+    if (people.length > visible.length) {
+      const more = document.createElement('span');
+      more.className = 'zc-participant-more';
+      more.textContent = `+${people.length - visible.length}`;
+      more.title = `${people.length - visible.length} participante(s) a mais`;
+      avatars.appendChild(more);
+    }
+
+    summary.appendChild(avatars);
+
+    const head = document.createElement('div');
+    head.className = 'zc-chat-participants-popover-title';
+    head.textContent = `Nesta conversa · ${people.length}`;
+    pop.appendChild(head);
+
+    people.forEach((person) => {
+      const row = document.createElement('div');
+      row.className = 'zc-chat-participants-row';
+      row.appendChild(makeParticipantAvatar(person, true));
+
+      const copy = document.createElement('div');
+      copy.className = 'zc-chat-participants-row-copy';
+      const name = document.createElement('strong');
+      name.textContent = person.nome;
+      const role = document.createElement('span');
+      role.textContent = person.is_responsavel ? 'Responsável principal' : 'Participando';
+      copy.append(name, role);
+      row.appendChild(copy);
+
+      if (person.is_responsavel) {
+        const badge = document.createElement('span');
+        badge.className = 'zc-chat-participants-owner-badge';
+        badge.textContent = 'Responsável';
+        row.appendChild(badge);
+      }
+      pop.appendChild(row);
+    });
   }
 
   function parseConversationRef(raw) {
@@ -569,6 +813,12 @@
 
   function claimWords(meta) {
     const dep = isDepartmentClaim(meta);
+    const queue = toInt(meta?.fila_id) != null;
+    const timeoutEnabled = queue && meta?.retorno_inatividade_ativo === true;
+    const timeoutMinutes = toInt(meta?.retorno_inatividade_minutos);
+    const timeoutText = timeoutEnabled && timeoutMinutes
+      ? ` Se ficar sem responder por ${timeoutMinutes} min, a conversa volta para a fila.`
+      : '';
 
     return dep
       ? {
@@ -577,9 +827,13 @@
           accepted: "Atendimento assumido",
           acceptedByYou: "Atendimento com você",
           acceptTitle: "Atender conversa",
-          waitingTitle: "Atenda para responder",
-          waitingSubtitle: "Clique em Atender para assumir este atendimento.",
-          acceptedSubtitle: "Agora você pode responder normalmente.",
+          waitingTitle: queue ? "Conversa aguardando na fila" : "Atenda para responder",
+          waitingSubtitle: queue
+            ? `Clique em Atender para assumir este atendimento.${timeoutText}`
+            : "Clique em Atender para assumir este atendimento.",
+          acceptedSubtitle: queue
+            ? `Agora você pode responder normalmente.${timeoutText}`
+            : "Agora você pode responder normalmente.",
           otherTitle: "Atendimento em andamento",
           otherSubtitle: "Você pode participar sem alterar o responsável principal.",
           success: "Atendimento assumido com sucesso.",
@@ -849,6 +1103,15 @@
       responsavel_id: operadorId,
       operador_nome: meta?.operador_nome || meta?.responsavel_nome || null,
       responsavel_nome: meta?.responsavel_nome || meta?.operador_nome || null,
+      responsavel_por_mim: meta?.responsavel_por_mim != null
+        ? Boolean(meta.responsavel_por_mim)
+        : Boolean(operadorId && currentColabId && operadorId === currentColabId),
+      participantes: Array.isArray(meta?.participantes)
+        ? meta.participantes.map((p) => ({ ...p }))
+        : (Array.isArray(meta?.raw?.participantes) ? meta.raw.participantes.map((p) => ({ ...p })) : []),
+      participantes_ids: Array.isArray(meta?.participantes_ids)
+        ? [...meta.participantes_ids]
+        : (Array.isArray(meta?.raw?.participantes_ids) ? [...meta.raw.participantes_ids] : []),
 
       exigir_aceite: exigirAceite,
       aceite_obrigatorio: exigirAceite,
@@ -857,6 +1120,8 @@
       fila_id: meta?.fila_id ?? null,
       fila_nome: meta?.fila_nome ?? null,
       fila_exigir_aceite: Boolean(meta?.fila_exigir_aceite),
+      retorno_inatividade_ativo: Boolean(meta?.retorno_inatividade_ativo),
+      retorno_inatividade_minutos: toInt(meta?.retorno_inatividade_minutos),
 
       claim_mode: meta?.claim_mode || null,
       departamento_claim: Boolean(meta?.departamento_claim),
@@ -1091,6 +1356,8 @@
     const currentColabId = getCurrentColabId();
     const { aceitar, liberar, transferir } = getButtons();
 
+    renderParticipantsFromMeta(conv, meta);
+
     if (!conv || conv.is_group || !meta) {
       hideClaimUi();
       return;
@@ -1308,6 +1575,7 @@
 
     if (!conv || conv.is_group) {
       __lastRenderedConversationKey = "";
+      clearParticipantsUi();
       hideClaimUi();
       return;
     }
@@ -2465,6 +2733,6 @@
   }
 
   try {
-    console.info("[ZapsChat][aceitar-conversa] carregado: zc-claim-shared-participants-v3");
+    console.info("[ZapsChat][aceitar-conversa] carregado: zc-claim-shared-participants-v5-clean-avatars");
   } catch {}
 })();

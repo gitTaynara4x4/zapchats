@@ -16,10 +16,12 @@
       try {
         var saved = localStorage.getItem("zapschat_theme");
         if (saved !== "dark" && saved !== "light") {
-          saved = "light";
-          localStorage.setItem("zapschat_theme", "light");
+          var legacy = localStorage.getItem("theme") || localStorage.getItem("valora_theme") || localStorage.getItem("zc:theme");
+          saved = legacy === "dark" || legacy === "light" ? legacy : "light";
         }
+        localStorage.setItem("zapschat_theme", saved);
         localStorage.setItem("theme", saved);
+        localStorage.setItem("valora_theme", saved);
         document.documentElement.classList.toggle("dark", saved === "dark");
         document.documentElement.setAttribute("data-theme", saved);
       } catch (e) {

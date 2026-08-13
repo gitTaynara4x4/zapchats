@@ -1,0 +1,410 @@
+<!-- /frontend/partials/sidebar-atendimento/estrutura/sidebar-atendimento.html -->
+<!-- Sidebar modularizada em 5 pastas: tema, estilos, estrutura, logica e navegacao. -->
+
+<link rel="preload" as="image" href="/img/fav-icon.png">
+<link rel="preload" as="image" href="/img/logo-s-fundo.png">
+<link rel="preload" as="image" href="/img/logo-white.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/frontend/partials/sidebar-atendimento/estilos/sidebar-atendimento.css?v=20260812-modular-v1">
+
+<script src="/frontend/partials/sidebar-atendimento/tema/tema.js?v=20260812-modular-v1"></script>
+
+<button type="button" class="wpp-mobile-float-toggle" id="wppMobileToggle" aria-label="Abrir menu" aria-expanded="false">
+  <svg viewBox="0 0 24 24" aria-hidden="true">
+    <path d="M4 6h16v2H4V6Zm0 5h16v2H4v-2Zm0 5h16v2H4v-2Z"></path>
+  </svg>
+</button>
+
+<div class="wpp-mobile-overlay" id="wppMobileOverlay"></div>
+
+<nav class="wpp-leftbar" id="wppAtendSidebar" aria-label="Menu do atendimento">
+  <div class="wpp-leftbar-logo">
+    <a href="/dashboard" class="wpp-leftbar-logo-link" aria-label="Ir para dashboard">
+      <img class="wpp-leftbar-logo-fav" src="/img/fav-icon.png?v=12" alt="ZapsChat" onerror="this.onerror=null;this.src='/frontend/img/fav-icon.png?v=12';">
+      <img class="wpp-leftbar-logo-light" src="/img/logo-s-fundo.png?v=12" alt="ZapsChat" onerror="this.onerror=null;this.src='/frontend/img/logo-s-fundo.png?v=12';">
+      <img class="wpp-leftbar-logo-dark" src="/img/logo-white.png?v=12" alt="ZapsChat" onerror="this.onerror=null;this.src='/frontend/img/logo-white.png?v=12';">
+    </a>
+
+    <button type="button" class="wpp-mobile-close" id="wppMobileClose" aria-label="Fechar menu">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M18.3 5.71 12 12l6.3 6.29-1.42 1.42L10.59 13.4 4.29 19.7 2.87 18.3 9.17 12l-6.3-6.29L4.29 4.3l6.3 6.3 6.29-6.3Z"></path>
+      </svg>
+    </button>
+  </div>
+
+  <div class="wpp-leftbar-icons">
+    <a class="wpp-leftbar-icon" data-menu="dashboard" href="/dashboard" title="Dashboard" aria-label="Dashboard">
+      <svg viewBox="0 0 256 256" aria-hidden="true"><path d="M224,98H182V56a6,6,0,0,0-6-6H54V40a6,6,0,0,0-12,0V216a6,6,0,0,0,12,0V206h90a6,6,0,0,0,6-6V158h74a6,6,0,0,0,6-6V104A6,6,0,0,0,224,98ZM170,62V98H54V62ZM138,194H54V158h84Zm80-48H54V110H218Z"></path></svg>
+      <span class="wpp-label">Dashboard</span>
+    </a>
+
+    <a class="wpp-leftbar-icon" data-menu="atendimentos" href="/atendimentos" data-zc-no-self-nav="1" title="Atendimentos" aria-label="Atendimentos">
+      <svg viewBox="0 0 256 256" aria-hidden="true"><path d="M225.88,30.12a13.83,13.83,0,0,0-13.7-3.58l-.11,0L20.14,84.77A14,14,0,0,0,18,110.85l85.56,41.64L145.12,238a13.87,13.87,0,0,0,12.61,8c.4,0,.81,0,1.21-.05a13.9,13.9,0,0,0,12.29-10.09l58.2-191.93,0-.11A13.83,13.83,0,0,0,225.88,30.12Zm-8,10.4L159.73,232.43l0,.11a2,2,0,0,1-3.76.26l-40.68-83.58,49-49a6,6,0,1,0-8.49-8.49l-49,49L23.15,100a2,2,0,0,1,.31-3.74l.11,0L215.48,38.08a1.94,1.94,0,0,1,1.92.52A2,2,0,0,1,217.92,40.52Z"></path></svg>
+      <span class="wpp-label">Atendimentos</span>
+    </a>
+
+    <a class="wpp-leftbar-icon" data-menu="midias" href="/midias" title="Arquivos" aria-label="Arquivos">
+      <svg viewBox="0 0 256 256" aria-hidden="true"><path d="M243.36,111.81A14,14,0,0,0,232,106H214V88a14,14,0,0,0-14-14H130L101.74,52.8a14.06,14.06,0,0,0-8.4-2.8H40A14,14,0,0,0,26,64V208a6,6,0,0,0,6,6H211.1a6,6,0,0,0,5.69-4.1l28.49-85.47A14,14,0,0,0,243.36,111.81ZM40,62H93.34a2,2,0,0,1,1.2.4L124.4,84.8A6,6,0,0,0,128,86h72a2,2,0,0,1,2,2v18H69.77a14,14,0,0,0-13.28,9.57L38,171V64A2,2,0,0,1,40,62Zm193.9,58.63L206.78,202H40.33l27.54-82.63a2,2,0,0,1,1.9-1.37H232a2,2,0,0,1,1.9,2.63Z"></path></svg>
+      <span class="wpp-label">Arquivos</span>
+    </a>
+
+    <a class="wpp-leftbar-icon" data-menu="chat-interno" href="/chat-interno" title="Chat Interno" aria-label="Chat Interno">
+      <svg viewBox="0 0 256 256" aria-hidden="true"><path d="M229.93,186.58A78,78,0,0,0,168.16,74.42,78,78,0,1,0,26.07,138.58L18.58,164A14,14,0,0,0,36,181.42l25.46-7.49a78,78,0,0,0,26.39,7.63,78,78,0,0,0,106.77,40.37L220,229.42A14,14,0,0,0,237.42,212ZM62,161.5a6.05,6.05,0,0,0-1.69.24l-27.77,8.17a2,2,0,0,1-2.48-2.48l8.17-27.77a6.05,6.05,0,0,0-.47-4.53,66,66,0,1,1,27.08,27.08A6,6,0,0,0,62,161.5Zm155.71,26.16,8.17,27.77a2,2,0,0,1-2.48,2.48l-27.77-8.17a6.06,6.06,0,0,0-4.53.47,66,66,0,0,1-90-28.4,77.92,77.92,0,0,0,71-94.68,66,66,0,0,1,46.07,96A6.05,6.05,0,0,0,217.74,187.66Z"></path></svg>
+      <span class="wpp-label">Chat Interno</span>
+    </a>
+
+    <a class="wpp-leftbar-icon" data-menu="clientes" href="/clientes" title="Clientes" aria-label="Clientes">
+      <svg viewBox="0 0 256 256" aria-hidden="true"><path d="M154,80a6,6,0,0,1,6-6h88a6,6,0,0,1,0,12H160A6,6,0,0,1,154,80Zm94,42H160a6,6,0,0,0,0,12h88a6,6,0,0,0,0-12Zm0,48H184a6,6,0,0,0,0,12h64a6,6,0,0,0,0-12Zm-98.19,20.5a6,6,0,1,1-11.62,3C131.7,168.29,107.23,150,80,150s-51.7,18.29-58.19,43.49a6,6,0,1,1-10.38-6A70.1,70.1,0,0,1,103,182.55a46,46,0,1,1,50.1,0A70.1,70.1,0,0,1,189.19,213ZM128,178a34,34,0,1,0-34-34A34,34,0,0,0,128,178ZM70,120a6,6,0,0,0-6-6A26,26,0,1,1,89.18,81.49a6,6,0,1,0,11.62-3,38,38,0,1,0-59.91,39.63A65.69,65.69,0,0,0,11.2,140.4a6,6,0,1,0,9.6,7.2A53.58,53.58,0,0,1,64,126,6,6,0,0,0,70,120Z"></path></svg>
+      <span class="wpp-label">Clientes</span>
+    </a>
+
+    <a class="wpp-leftbar-icon" data-menu="colaboradores" href="/colaboradores" title="Colaboradores" aria-label="Colaboradores">
+      <svg viewBox="0 0 256 256" aria-hidden="true"><path d="M243.6,148.8a6,6,0,0,1-8.4-1.2A53.58,53.58,0,0,0,192,126a6,6,0,0,1,0-12,26,26,0,1,0-25.18-32.5,6,6,0,0,1-11.62-3,38,38,0,1,1,59.91,39.63A65.69,65.69,0,0,1,244.8,140.4,6,6,0,0,1,243.6,148.8ZM189.19,213a6,6,0,0,1-2.19,8.2,5.9,5.9,0,0,1-3,.81,6,6,0,0,1-5.2-3,59,59,0,0,0-101.62,0,6,6,0,1,1-10.38-6A70.1,70.1,0,0,1,103,182.55a46,46,0,1,1,50.1,0A70.1,70.1,0,0,1,189.19,213ZM128,178a34,34,0,1,0-34-34A34,34,0,0,0,128,178ZM70,120a6,6,0,0,0-6-6A26,26,0,1,1,89.18,81.49a6,6,0,1,0,11.62-3,38,38,0,1,0-59.91,39.63A65.69,65.69,0,0,0,11.2,140.4a6,6,0,1,0,9.6,7.2A53.58,53.58,0,0,1,64,126,6,6,0,0,0,70,120Z"></path></svg>
+      <span class="wpp-label">Colaboradores</span>
+    </a>
+
+    <a class="wpp-leftbar-icon" data-menu="departamentos" href="/departamentos" title="Departamentos" aria-label="Departamentos">
+      <svg viewBox="0 0 256 256" aria-hidden="true"><path d="M248,210H230V94h2a6,6,0,0,0,0-12H182V46h2a6,6,0,0,0,0-12H40a6,6,0,0,0,0,12h2V210H24a6,6,0,0,0,0,12H248a6,6,0,0,0,0-12ZM218,94V210H182V94ZM54,46H170V210H142V160a6,6,0,0,0-6-6H88a6,6,0,0,0-6,6v50H54Zm76,164H94V166h36ZM74,80a6,6,0,0,1,6-6H96a6,6,0,0,1,0,12H80A6,6,0,0,1,74,80Zm48,0a6,6,0,0,1,6-6h16a6,6,0,0,1,0,12H128A6,6,0,0,1,122,80ZM80,126a6,6,0,0,1,0-12H96a6,6,0,0,1,0,12Zm42-6a6,6,0,0,1,6-6h16a6,6,0,0,1,0,12H128A6,6,0,0,1,122,120Z"></path></svg>
+      <span class="wpp-label">Departamentos</span>
+    </a>
+
+    <a class="wpp-leftbar-icon" data-menu="chatbot" href="/chatbot" title="Chatbot" aria-label="Chatbot">
+      <svg viewBox="0 0 256 256" aria-hidden="true"><path d="M222,114.56a54,54,0,0,0-58.67-74.73,54,54,0,0,0-94,13.46A54,54,0,0,0,34,141.44a54,54,0,0,0,35.56,73.65A54.54,54.54,0,0,0,83.59,217a52.86,52.86,0,0,0,9.06-.78,54,54,0,0,0,94-13.46A54,54,0,0,0,222,114.56ZM183.37,52.5a42,42,0,0,1,29.21,53.14,54.84,54.84,0,0,0-5.08-3.33L163,76.62a6,6,0,0,0-6,0l-47,27.13V80.66l41.5-24A41.73,41.73,0,0,1,183.37,52.5ZM78,72a42,42,0,0,1,72.92-28.43,56.18,56.18,0,0,0-5.42,2.74L101,72a6,6,0,0,0-3,5.19v54.27L78,119.92ZM39.13,85.93a41.75,41.75,0,0,1,27.22-20A55.09,55.09,0,0,0,66,72v51.38a6,6,0,0,0,3,5.2l47,27.13L96,167.26l-41.5-24A42,42,0,0,1,39.13,85.93ZM72.63,203.5a42,42,0,0,1-29.21-53.14,54.84,54.84,0,0,0,5.08,3.33L93,179.38a6,6,0,0,0,6,0l47-27.13v23.09l-41.5,24A41.73,41.73,0,0,1,72.63,203.5ZM178,184a42,42,0,0,1-72.92,28.43,56.18,56.18,0,0,0,5.42-2.74L155,184a6,6,0,0,0,3-5.19V124.54l20,11.54Zm38.87-13.93a41.75,41.75,0,0,1-27.22,20A55.09,55.09,0,0,0,190,184V132.62a6,6,0,0,0-3-5.2l-47-27.13,20-11.55,41.5,24A42,42,0,0,1,216.87,170.07Z"></path></svg>
+      <span class="wpp-label">Chatbot</span>
+    </a>
+
+    <a class="wpp-leftbar-icon" data-menu="disparos" href="/disparos" title="Disparador" aria-label="Disparador">
+      <svg viewBox="0 0 256 256" aria-hidden="true"><path d="M231.87,114l-168-95.89A16,16,0,0,0,40.92,37.34L71.55,128,40.92,218.67A16,16,0,0,0,56,240a16.15,16.15,0,0,0,7.93-2.1l167.92-96.05a16,16,0,0,0,.05-27.89ZM56,224a.56.56,0,0,0,0-.12L85.74,136H144a8,8,0,0,0,0-16H85.74L56.06,32.16A.46.46,0,0,0,56,32l168,95.83Z"></path></svg>
+      <span class="wpp-label">Disparador</span>
+    </a>
+
+    <a class="wpp-leftbar-icon" data-menu="conectar" href="/conectar" title="Conectar WhatsApp" aria-label="Conectar WhatsApp">
+      <svg viewBox="0 0 256 256" aria-hidden="true"><path d="M104,42H56A14,14,0,0,0,42,56v48a14,14,0,0,0,14,14h48a14,14,0,0,0,14-14V56A14,14,0,0,0,104,42Zm2,62a2,2,0,0,1-2,2H56a2,2,0,0,1-2-2V56a2,2,0,0,1,2-2h48a2,2,0,0,1,2,2Zm-2,34H56a14,14,0,0,0-14,14v48a14,14,0,0,0,14,14h48a14,14,0,0,0,14-14V152A14,14,0,0,0,104,138Zm2,62a2,2,0,0,1-2,2H56a2,2,0,0,1-2-2V152a2,2,0,0,1,2-2h48a2,2,0,0,1,2,2ZM200,42H152a14,14,0,0,0-14,14v48a14,14,0,0,0,14,14h48a14,14,0,0,0,14-14V56A14,14,0,0,0,200,42Zm2,62a2,2,0,0,1-2,2H152a2,2,0,0,1-2-2V56a2,2,0,0,1,2-2h48a2,2,0,0,1,2,2Zm-64,72V144a6,6,0,0,1,12,0v32a6,6,0,0,1-12,0Zm76-16a6,6,0,0,1-6,6H182v42a6,6,0,0,1-6,6H144a6,6,0,0,0,0,12h26V144a6,6,0,0,1,12,0v10h26A6,6,0,0,1,214,160Zm0,32v16a6,6,0,0,1-12,0V192a6,6,0,0,1,12,0Z"></path></svg>
+      <span class="wpp-label">Conectar WhatsApp</span>
+    </a>
+
+    <div class="wpp-leftbar-section-label" aria-label="Atendimentos">
+      <span>ATENDIMENTOS</span>
+    </div>
+
+    <a class="wpp-leftbar-icon" data-menu="filas" href="/filas" title="Filas" aria-label="Filas">
+      <svg viewBox="0 0 256 256" aria-hidden="true"><path d="M40,64a8,8,0,0,1,8-8H208a8,8,0,0,1,0,16H48A8,8,0,0,1,40,64Zm168,56H48a8,8,0,0,0,0,16H208a8,8,0,0,0,0-16Zm0,64H48a8,8,0,0,0,0,16H208a8,8,0,0,0,0-16Zm-24-96a8,8,0,0,1-8,8H48a8,8,0,0,1,0-16H176A8,8,0,0,1,184,88Z"></path></svg>
+      <span class="wpp-label">Filas</span>
+    </a>
+  </div>
+
+  <div class="wpp-leftbar-user-wrap">
+    <button class="wpp-leftbar-user-btn" type="button" id="wppUserMenuBtn" aria-haspopup="dialog" aria-expanded="false">
+      <div class="wpp-leftbar-avatar">
+        <img id="wppUserAvatarImg" alt="Foto do WhatsApp selecionado" referrerpolicy="no-referrer">
+        <span id="wppUserInitials">U</span>
+      </div>
+
+      <div class="wpp-leftbar-user-info">
+        <strong id="wppUserName">Usuário</strong>
+        <span id="wppUserEmail">email@empresa.com</span>
+      </div>
+
+      <span class="wpp-leftbar-user-chevron" aria-hidden="true">
+        <svg viewBox="0 0 256 256"><path d="M128,168a8,8,0,0,1-5.66-2.34l-56-56a8,8,0,0,1,11.32-11.32L128,148.69l50.34-50.35a8,8,0,0,1,11.32,11.32l-56,56A8,8,0,0,1,128,168Z"></path></svg>
+      </span>
+    </button>
+  </div>
+</nav>
+
+<div class="zc-wa-settings-overlay" id="zcWaSettingsOverlay" aria-hidden="true">
+  <section class="zc-wa-settings-panel" aria-label="Configurações do atendimento">
+    <header class="zc-wa-settings-head">
+      <div class="zc-wa-settings-title">
+        <strong>Configurações</strong>
+        <span>Painel do atendimento</span>
+      </div>
+
+      <button type="button" class="zc-wa-settings-close" id="zcWaSettingsClose" aria-label="Fechar configurações">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M18.3 5.71 12 12l6.3 6.29-1.42 1.42L10.59 13.4 4.29 19.7 2.87 18.3 9.17 12l-6.3-6.29L4.29 4.3l6.3 6.3 6.29-6.3Z"></path>
+        </svg>
+      </button>
+    </header>
+
+    <div class="zc-wa-settings-search">
+      <label class="zc-wa-settings-searchbox" for="zcWaSettingsSearch">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M9.5 3a6.5 6.5 0 0 1 5.16 10.45l4.44 4.45-1.41 1.41-4.45-4.44A6.5 6.5 0 1 1 9.5 3Zm0 2a4.5 4.5 0 1 0 0 9 4.5 4.5 0 0 0 0-9Z"></path>
+        </svg>
+        <input id="zcWaSettingsSearch" type="text" placeholder="Pesquisar configurações" autocomplete="off">
+      </label>
+    </div>
+
+    <div class="zc-wa-settings-body">
+      <div class="zc-wa-settings-notice" id="zcWaNotice" role="button" tabindex="0" aria-label="Configurar notificações">
+        <span class="zc-wa-settings-notice-ico" aria-hidden="true">
+          <svg viewBox="0 0 256 256"><path d="M216,184H200V112a72,72,0,0,0-144,0v72H40a8,8,0,0,0,0,16H216a8,8,0,0,0,0-16ZM72,184V112a56,56,0,0,1,112,0v72Zm88,24a32,32,0,0,1-64,0Z"></path></svg>
+        </span>
+        <div class="zc-wa-settings-notice-copy">
+          <strong>Fique por dentro</strong>
+          <span>Ative notificações para não perder nenhum atendimento.</span>
+        </div>
+        <span class="zc-wa-settings-notice-action" aria-hidden="true">
+          Configurar
+          <svg viewBox="0 0 24 24"><path d="m9 18 6-6-6-6 1.4-1.4L17.8 12l-7.4 7.4Z"></path></svg>
+        </span>
+        <button type="button" class="zc-wa-settings-notice-close" id="zcWaNoticeClose" aria-label="Ocultar aviso">
+          <svg viewBox="0 0 24 24"><path d="M18.3 5.71 12 12l6.3 6.29-1.42 1.42L10.59 13.4 4.29 19.7 2.87 18.3 9.17 12l-6.3-6.29L4.29 4.3l6.3 6.3 6.29-6.3Z"></path></svg>
+        </button>
+      </div>
+
+      <div class="zc-wa-settings-user-card">
+        <div class="zc-wa-settings-avatar" aria-hidden="true">
+          <img id="zcWaSettingsAvatarImg" alt="" referrerpolicy="no-referrer">
+          <span id="zcWaSettingsAvatarInitials">U</span>
+          <i class="zc-wa-settings-avatar-status"></i>
+        </div>
+
+        <div class="zc-wa-settings-user-meta">
+          <strong id="zcWaSettingsName">Usuário</strong>
+          <span id="zcWaSettingsInstanceNumber">Selecione uma instância própria no topo</span>
+          <div class="zc-wa-settings-quote">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v12H8l-4 4V4Zm2 2v9.17L7.17 14H18V6H6Z"></path></svg>
+            <span>Painel de atendimento ZapsChat</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="zc-wa-settings-menu" id="zcWaSettingsMenu">
+        <div class="zc-wa-settings-section" data-zc-settings-section="account">Conta</div>
+        <button type="button" class="zc-wa-settings-item" data-zc-settings-group="account" data-zc-settings-tab="profile" data-title="Perfil" data-search="perfil meu perfil nome foto whatsapp instancia">
+          <span class="zc-wa-settings-item-icon">
+            <svg viewBox="0 0 256 256"><path d="M128,128A48,48,0,1,0,80,80,48.05,48.05,0,0,0,128,128Zm0-80a32,32,0,1,1-32,32A32,32,0,0,1,128,48Zm0,96c-44.11,0-80,25.12-80,56a8,8,0,0,0,16,0c0-21.05,29.3-40,64-40s64,18.95,64,40a8,8,0,0,0,16,0C208,169.12,172.11,144,128,144Z"></path></svg>
+          </span>
+          <span class="zc-wa-settings-item-copy">
+            <strong>Perfil</strong>
+            <span>Gerencie nome, foto e informações do WhatsApp</span>
+          </span>
+        </button>
+
+        <button type="button" class="zc-wa-settings-item" data-zc-settings-group="account" data-zc-settings-tab="account" data-title="Conta" data-search="conta segurança dados acesso senha sessão">
+          <span class="zc-wa-settings-item-icon">
+            <svg viewBox="0 0 256 256"><path d="M208,40H48A16,16,0,0,0,32,56V200a16,16,0,0,0,16,16H208a16,16,0,0,0,16-16V56A16,16,0,0,0,208,40ZM96,184H64a8,8,0,0,1,0-16H96a8,8,0,0,1,0,16Zm0-32H64a8,8,0,0,1,0-16H96a8,8,0,0,1,0,16Zm96,32H128a8,8,0,0,1,0-16h64a8,8,0,0,1,0,16Zm0-32H128a8,8,0,0,1,0-16h64a8,8,0,0,1,0,16Zm0-48H64a8,8,0,0,1,0-16H192a8,8,0,0,1,0,16Z"></path></svg>
+          </span>
+          <span class="zc-wa-settings-item-copy">
+            <strong>Conta</strong>
+            <span>Segurança, dados da conta e preferências de acesso</span>
+          </span>
+        </button>
+
+        <button type="button" class="zc-wa-settings-item" data-zc-settings-group="account" data-zc-settings-tab="privacy" data-title="Privacidade" data-search="privacidade contatos bloqueios mensagens temporarias">
+          <span class="zc-wa-settings-item-icon">
+            <svg viewBox="0 0 256 256"><path d="M208,80H176V56a48,48,0,0,0-96,0V80H48A16,16,0,0,0,32,96V216a16,16,0,0,0,16,16H208a16,16,0,0,0,16-16V96A16,16,0,0,0,208,80ZM96,56a32,32,0,0,1,64,0V80H96Zm48,112a16,16,0,1,1-16-16A16,16,0,0,1,144,168Z"></path></svg>
+          </span>
+          <span class="zc-wa-settings-item-copy">
+            <strong>Privacidade</strong>
+            <span>Contatos, bloqueios e controles de privacidade</span>
+          </span>
+        </button>
+
+        <div class="zc-wa-settings-section" data-zc-settings-section="panel">Painel</div>
+        <button type="button" class="zc-wa-settings-item is-active" data-zc-settings-group="panel" data-zc-settings-tab="settings" data-title="Configurações" data-search="configurações ajustes painel atendimento">
+          <span class="zc-wa-settings-item-icon">
+            <svg viewBox="0 0 256 256"><path d="M230.94,123.05l-14.27-8.25c.24-2.24.33-4.52.33-6.8s-.09-4.56-.33-6.8l14.27-8.25a14,14,0,0,0,5.12-19.11l-12-20.78a14,14,0,0,0-18.52-5.5l-14.3,8.26a78.65,78.65,0,0,0-11.77-6.8V32a14,14,0,0,0-14-14H142a14,14,0,0,0-14,14V48.02a78.65,78.65,0,0,0-11.77,6.8l-14.3-8.26a14,14,0,0,0-18.52,5.5l-12,20.78a14,14,0,0,0,5.12,19.11l14.27,8.25c-.24,2.24-.33,4.52-.33,6.8s.09,4.56.33,6.8l-14.27,8.25a14,14,0,0,0-5.12,19.11l12,20.78a14,14,0,0,0,18.52,5.5l14.3-8.26a78.65,78.65,0,0,0,11.77,6.8V224a14,14,0,0,0,14,14h24a14,14,0,0,0,14-14V207.98a78.65,78.65,0,0,0,11.77-6.8l14.3,8.26a14,14,0,0,0,18.52-5.5l12-20.78A14,14,0,0,0,230.94,123.05ZM154,128a26,26,0,1,1-26-26A26,26,0,0,1,154,128Z"></path></svg>
+          </span>
+          <span class="zc-wa-settings-item-copy">
+            <strong>Configurações</strong>
+            <span>Ajustes gerais do painel de atendimento</span>
+          </span>
+        </button>
+
+        <button type="button" class="zc-wa-settings-item" data-zc-settings-group="panel" data-zc-settings-tab="notifications" data-title="Notificações" data-search="notificações alertas mensagens grupos sons">
+          <span class="zc-wa-settings-item-icon">
+            <svg viewBox="0 0 256 256"><path d="M221.8,175.94C216.25,169.38,208,157,208,128.45V120a80,80,0,0,0-160,0v8.45C48,157,39.75,169.39,34.2,175.94A15.59,15.59,0,0,0,32,192a16,16,0,0,0,14.87,10H96a32,32,0,0,0,64,0h49.13A16,16,0,0,0,224,192,15.59,15.59,0,0,0,221.8,175.94ZM128,216a16,16,0,0,1-15.2-11h30.4A16,16,0,0,1,128,216Zm81.27-30H46.73c7.4-8.73,17.27-24.26,17.27-57.55V120a64,64,0,0,1,128,0v8.45C192,161.74,201.87,177.27,209.27,186Z"></path></svg>
+          </span>
+          <span class="zc-wa-settings-item-copy">
+            <strong>Notificações</strong>
+            <span>Alertas de mensagens, grupos e sons</span>
+          </span>
+        </button>
+
+        <button type="button" class="zc-wa-settings-item" data-zc-settings-group="panel" data-zc-settings-tab="shortcuts" data-title="Atalhos do teclado" data-search="atalhos teclado comandos rápidos">
+          <span class="zc-wa-settings-item-icon">
+            <svg viewBox="0 0 256 256"><path d="M224,64H32A16,16,0,0,0,16,80v96a16,16,0,0,0,16,16H224a16,16,0,0,0,16-16V80A16,16,0,0,0,224,64ZM72,152H56a8,8,0,0,1,0-16H72a8,8,0,0,1,0,16Zm0-32H56a8,8,0,0,1,0-16H72a8,8,0,0,1,0,16Zm40,32H96a8,8,0,0,1,0-16h16a8,8,0,0,1,0,16Zm0-32H96a8,8,0,0,1,0-16h16a8,8,0,0,1,0,16Zm88,32H136a8,8,0,0,1,0-16h64a8,8,0,0,1,0,16Zm0-32H136a8,8,0,0,1,0-16h64a8,8,0,0,1,0,16Z"></path></svg>
+          </span>
+          <span class="zc-wa-settings-item-copy">
+            <strong>Atalhos do teclado</strong>
+            <span>Veja e personalize ações rápidas</span>
+          </span>
+        </button>
+
+        <div class="zc-wa-settings-section" data-zc-settings-section="support">Suporte</div>
+        <button type="button" class="zc-wa-settings-item" data-zc-settings-group="support" data-zc-settings-tab="help" data-title="Ajuda e feedback" data-search="ajuda feedback suporte política sobre">
+          <span class="zc-wa-settings-item-icon">
+            <svg viewBox="0 0 256 256"><path d="M140,180a12,12,0,1,1-12-12A12,12,0,0,1,140,180ZM128,48c-22.06,0-40,16.15-40,36a8,8,0,0,0,16,0c0-11,10.77-20,24-20s24,9,24,20-10.77,20-24,20a8,8,0,0,0-8,8v24a8,8,0,0,0,16,0V119.32c18.24-3.35,32-17.89,32-35.32C168,64.15,150.06,48,128,48Zm104,80A104,104,0,1,1,128,24,104.11,104.11,0,0,1,232,128Zm-16,0a88,88,0,1,0-88,88A88.1,88.1,0,0,0,216,128Z"></path></svg>
+          </span>
+          <span class="zc-wa-settings-item-copy">
+            <strong>Ajuda e feedback</strong>
+            <span>Obtenha ajuda ou envie sugestões</span>
+          </span>
+        </button>
+
+        <div class="zc-wa-settings-section" data-zc-settings-section="personalization">Personalização</div>
+        <button type="button" class="zc-wa-settings-item" data-zc-settings-group="personalization" data-zc-settings-tab="theme" data-title="Alternar tema" data-search="tema claro escuro dark light">
+          <span class="zc-wa-settings-item-icon">
+            <svg viewBox="0 0 256 256"><path d="M120,40V24a8,8,0,0,1,16,0V40a8,8,0,0,1-16,0Zm72,88a64,64,0,1,1-64-64A64.07,64.07,0,0,1,192,128Zm-16,0a48,48,0,1,0-48,48A48.05,48.05,0,0,0,176,128ZM58.34,69.66a8,8,0,0,0,11.32-11.32L58.34,47A8,8,0,0,0,47,58.34ZM40,120H24a8,8,0,0,0,0,16H40a8,8,0,0,0,0-16Zm18.34,66.34L47,197.66A8,8,0,0,0,58.34,209l11.32-11.31a8,8,0,0,0-11.32-11.32ZM136,216v16a8,8,0,0,1-16,0V216a8,8,0,0,1,16,0Zm72.69-18.34A8,8,0,0,0,197.37,209l11.32,11.31A8,8,0,0,0,220,209Zm23.31-77.66H216a8,8,0,0,0,0,16h16a8,8,0,0,0,0-16Zm-34.63-50.34A8,8,0,0,0,209,69.66L220.31,58.34A8,8,0,0,0,209,47L197.37,58.34A8,8,0,0,0,197.37,69.66Z"></path></svg>
+          </span>
+          <span class="zc-wa-settings-item-copy">
+            <strong>Alternar tema</strong>
+            <span>Trocar entre claro e escuro</span>
+          </span>
+        </button>
+
+        <div class="zc-wa-settings-section" data-zc-settings-section="session">Sessão</div>
+        <button type="button" class="zc-wa-settings-item zc-wa-settings-logout" data-zc-settings-group="session" id="zcWaSettingsLogout" data-zc-settings-tab="logout" data-title="Desconectar" data-search="sair desconectar logout">
+          <span class="zc-wa-settings-item-icon">
+            <svg viewBox="0 0 256 256"><path d="M222,128a6,6,0,0,1-6,6H117.66l37.17,37.17a6,6,0,0,1-8.49,8.49l-47.41-47.42a6,6,0,0,1,0-8.48l47.41-47.42a6,6,0,0,1,8.49,8.49L117.66,122H216A6,6,0,0,1,222,128ZM104,200a6,6,0,0,1-6,6H48a14,14,0,0,1-14-14V64A14,14,0,0,1,48,50H98a6,6,0,0,1,0,12H48a2,2,0,0,0-2,2V192a2,2,0,0,0,2,2H98A6,6,0,0,1,104,200Z"></path></svg>
+          </span>
+          <span class="zc-wa-settings-item-copy">
+            <strong>Desconectar</strong>
+            <span>Encerrar sessão neste dispositivo</span>
+          </span>
+        </button>
+      </div>
+    </div>
+  </section>
+
+  <main class="zc-wa-settings-content" aria-label="Conteúdo das configurações">
+    <div class="zc-wa-settings-home" id="zcWaSettingsHomeCard">
+      <section class="zc-wa-settings-home-hero" aria-label="Visão geral das configurações">
+        <h2>Configurações do atendimento</h2>
+        <p>Ajuste rapidamente os principais recursos do seu painel.</p>
+      </section>
+
+      <section class="zc-wa-settings-home-status">
+        <div class="zc-wa-settings-home-status-icon" aria-hidden="true">
+          <svg viewBox="0 0 256 256"><path d="M229.66,77.66l-128,128a8,8,0,0,1-11.32,0l-56-56a8,8,0,0,1,11.32-11.32L96,188.69,218.34,66.34a8,8,0,0,1,11.32,11.32Z"></path></svg>
+        </div>
+        <div class="zc-wa-settings-home-status-copy">
+          <strong id="zcWaSettingsHomeHeadline">Tudo pronto para uso</strong>
+          <span id="zcWaSettingsHomeSubline">Seu painel está configurado e funcionando normalmente.</span>
+        </div>
+        <div class="zc-wa-settings-home-status-badge" id="zcWaSettingsHomeBadge"><i></i><span>Ajustes rápidos</span></div>
+      </section>
+
+      <section class="zc-wa-settings-home-grid">
+        <article class="zc-wa-home-card">
+          <div class="zc-wa-home-card-head">
+            <div class="zc-wa-home-card-ico" aria-hidden="true"><svg viewBox="0 0 256 256"><path d="M221.8,175.94C216.25,169.38,208,157,208,128.45V120a80,80,0,0,0-160,0v8.45C48,157,39.75,169.39,34.2,175.94A15.59,15.59,0,0,0,32,192a16,16,0,0,0,14.87,10H96a32,32,0,0,0,64,0h49.13A16,16,0,0,0,224,192,15.59,15.59,0,0,0,221.8,175.94ZM128,216a16,16,0,0,1-15.2-11h30.4A16,16,0,0,1,128,216Zm81.27-30H46.73c7.4-8.73,17.27-24.26,17.27-57.55V120a64,64,0,0,1,128,0v8.45C192,161.74,201.87,177.27,209.27,186Z"></path></svg></div>
+            <div class="zc-wa-home-card-title">
+              <strong>Notificações</strong>
+              <span>Receba alertas sobre mensagens, menções e atividades importantes.</span>
+            </div>
+          </div>
+          <div class="zc-wa-home-card-foot">
+            <span class="zc-wa-home-status-pill" id="zcWaSettingsNotifStatus">Verificando</span>
+            <button type="button" class="zc-wa-home-btn" data-home-open-tab="notifications">Configurar</button>
+          </div>
+        </article>
+
+        <article class="zc-wa-home-card">
+          <div class="zc-wa-home-card-head">
+            <div class="zc-wa-home-card-ico" aria-hidden="true"><svg viewBox="0 0 256 256"><path d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm48,112a48,48,0,1,1-48-48A48.05,48.05,0,0,1,176,136ZM74.34,74.34a8,8,0,0,1,11.32,0L96,84.69l10.34-10.35a8,8,0,0,1,11.32,11.32L107.31,96l10.35,10.34a8,8,0,0,1-11.32,11.32L96,107.31,85.66,117.66a8,8,0,0,1-11.32-11.32L84.69,96,74.34,85.66A8,8,0,0,1,74.34,74.34ZM192,85.66,181.66,96,192,106.34a8,8,0,0,1-11.32,11.32L170.34,107.31,160,117.66a8,8,0,0,1-11.32-11.32L159,96,148.69,85.66A8,8,0,0,1,160,74.34l10.34,10.35,10.34-10.35A8,8,0,0,1,192,85.66Z"></path></svg></div>
+            <div class="zc-wa-home-card-title">
+              <strong>Tema</strong>
+              <span>Escolha como o painel será exibido.</span>
+            </div>
+          </div>
+          <div class="zc-wa-home-theme-switch" role="group" aria-label="Alternar tema">
+            <button type="button" class="zc-wa-home-theme-btn" data-zc-theme-option="light"><svg viewBox="0 0 256 256"><path d="M120,40V24a8,8,0,0,1,16,0V40a8,8,0,0,1-16,0Zm72,88a64,64,0,1,1-64-64A64.07,64.07,0,0,1,192,128Zm-16,0a48,48,0,1,0-48,48A48.05,48.05,0,0,0,176,128ZM58.34,69.66a8,8,0,0,0,11.32-11.32L58.34,47A8,8,0,0,0,47,58.34ZM40,120H24a8,8,0,0,0,0,16H40a8,8,0,0,0,0-16Zm18.34,66.34L47,197.66A8,8,0,0,0,58.34,209l11.32-11.31a8,8,0,0,0-11.32-11.32ZM136,216v16a8,8,0,0,1-16,0V216a8,8,0,0,1,16,0Zm72.69-18.34A8,8,0,0,0,197.37,209l11.32,11.31A8,8,0,0,0,220,209Zm23.31-77.66H216a8,8,0,0,0,0,16h16a8,8,0,0,0,0-16Zm-34.63-50.34A8,8,0,0,0,209,69.66L220.31,58.34A8,8,0,0,0,209,47L197.37,58.34A8,8,0,0,0,197.37,69.66Z"></path></svg><span>Claro</span></button>
+            <button type="button" class="zc-wa-home-theme-btn" data-zc-theme-option="dark"><svg viewBox="0 0 256 256"><path d="M235.54,150.63A12,12,0,0,0,222.86,144,84,84,0,0,1,112,33.14,12,12,0,0,0,105.37,20.46,104,104,0,1,0,235.54,150.63ZM128,208a80,80,0,0,1-19.91-157.5q-.09,2.75-.09,5.5a108,108,0,0,0,108,108q2.75,0,5.5-.09A80.13,80.13,0,0,1,128,208Z"></path></svg><span>Escuro</span></button>
+            <button type="button" class="zc-wa-home-theme-btn" data-zc-theme-option="system"><svg viewBox="0 0 256 256"><path d="M216,40H40A16,16,0,0,0,24,56V184a16,16,0,0,0,16,16h64v16H88a8,8,0,0,0,0,16h80a8,8,0,0,0,0-16H152V200h64a16,16,0,0,0,16-16V56A16,16,0,0,0,216,40ZM40,56H216V184H40Z"></path></svg><span>Sistema</span></button>
+          </div>
+        </article>
+
+        <article class="zc-wa-home-card">
+          <div class="zc-wa-home-card-head">
+            <div class="zc-wa-home-card-ico" aria-hidden="true"><svg viewBox="0 0 256 256"><path d="M208,80H176V56a48,48,0,0,0-96,0V80H48A16,16,0,0,0,32,96V216a16,16,0,0,0,16,16H208a16,16,0,0,0,16-16V96A16,16,0,0,0,208,80ZM96,56a32,32,0,0,1,64,0V80H96Zm48,112a16,16,0,1,1-16-16A16,16,0,0,1,144,168Z"></path></svg></div>
+            <div class="zc-wa-home-card-title">
+              <strong>Privacidade</strong>
+              <span>Controle informações, acesso e preferências do atendimento.</span>
+            </div>
+          </div>
+          <div class="zc-wa-home-card-foot">
+            <span class="zc-wa-home-status-pill">Protegido</span>
+            <button type="button" class="zc-wa-home-btn" data-home-open-tab="privacy">Gerenciar</button>
+          </div>
+        </article>
+
+        <article class="zc-wa-home-card">
+          <div class="zc-wa-home-card-head">
+            <div class="zc-wa-home-card-ico" aria-hidden="true"><svg viewBox="0 0 256 256"><path d="M224,64H32A16,16,0,0,0,16,80v96a16,16,0,0,0,16,16H224a16,16,0,0,0,16-16V80A16,16,0,0,0,224,64ZM72,152H56a8,8,0,0,1,0-16H72a8,8,0,0,1,0,16Zm0-32H56a8,8,0,0,1,0-16H72a8,8,0,0,1,0,16Zm40,32H96a8,8,0,0,1,0-16h16a8,8,0,0,1,0,16Zm0-32H96a8,8,0,0,1,0-16h16a8,8,0,0,1,0,16Zm88,32H136a8,8,0,0,1,0-16h64a8,8,0,0,1,0,16Zm0-32H136a8,8,0,0,1,0-16h64a8,8,0,0,1,0,16Z"></path></svg></div>
+            <div class="zc-wa-home-card-title">
+              <strong>Atalhos do teclado</strong>
+              <span>Use atalhos para ser mais rápido no dia a dia.</span>
+            </div>
+          </div>
+          <div class="zc-wa-home-shortcuts">
+            <div class="zc-wa-home-shortcut-row"><span class="zc-wa-home-key">Ctrl</span><span class="zc-wa-home-key">K</span><span>Buscar</span></div>
+            <div class="zc-wa-home-shortcut-row"><span class="zc-wa-home-key">Esc</span><span>Fechar</span></div>
+            <div class="zc-wa-home-shortcut-row"><span class="zc-wa-home-key">Enter</span><span>Enviar</span></div>
+          </div>
+          <div class="zc-wa-home-card-foot">
+            <span></span>
+            <button type="button" class="zc-wa-home-link" data-home-open-tab="shortcuts">Ver todos</button>
+          </div>
+        </article>
+
+        <article class="zc-wa-home-card">
+          <div class="zc-wa-home-card-head">
+            <div class="zc-wa-home-card-ico" aria-hidden="true"><svg viewBox="0 0 256 256"><path d="M128,128A48,48,0,1,0,80,80,48.05,48.05,0,0,0,128,128Zm0-80a32,32,0,1,1-32,32A32,32,0,0,1,128,48Zm0,96c-44.11,0-80,25.12-80,56a8,8,0,0,0,16,0c0-21.05,29.3-40,64-40s64,18.95,64,40a8,8,0,0,0,16,0C208,169.12,172.11,144,128,144Z"></path></svg></div>
+            <div class="zc-wa-home-card-title">
+              <strong>Conta</strong>
+              <span>Gerencie seus dados pessoais e preferências.</span>
+            </div>
+          </div>
+          <div class="zc-wa-home-person">
+            <div class="zc-wa-home-avatar" aria-hidden="true">
+              <img id="zcWaHomeAvatarImg" alt="" referrerpolicy="no-referrer">
+              <span id="zcWaHomeAvatarInitials">U</span>
+              <i></i>
+            </div>
+            <div class="zc-wa-home-meta">
+              <strong id="zcWaHomeUserName">Usuário</strong>
+              <span id="zcWaHomeUserPhone">Selecione uma instância própria no topo</span>
+            </div>
+          </div>
+          <div class="zc-wa-home-card-foot">
+            <span></span>
+            <button type="button" class="zc-wa-home-btn" data-home-open-tab="profile">Editar</button>
+          </div>
+        </article>
+
+        <article class="zc-wa-home-card">
+          <div class="zc-wa-home-card-head">
+            <div class="zc-wa-home-card-ico" aria-hidden="true"><svg viewBox="0 0 256 256"><path d="M128,24A88,88,0,0,0,40,112c0,37.5,23.11,65.4,56,76.27V224a8,8,0,0,0,13.66,5.66L136,203.31l26.34,26.35A8,8,0,0,0,176,224V188.27c32.89-10.87,56-38.77,56-76.27A88,88,0,0,0,128,24Zm0,16a72,72,0,0,1,72,72c0,31.43-20.84,55.34-50.7,64.27a8,8,0,0,0-5.3,7.66v20.69l-10.34-10.35a8,8,0,0,0-11.32,0L112,204.62V183.93a8,8,0,0,0-5.3-7.66C76.84,167.34,56,143.43,56,112A72,72,0,0,1,128,40Zm0,24a48,48,0,0,0-48,48,8,8,0,0,0,16,0,32,32,0,0,1,64,0,8,8,0,0,0,16,0A48,48,0,0,0,128,64Z"></path></svg></div>
+            <div class="zc-wa-home-card-title">
+              <strong>WhatsApp conectado</strong>
+              <span>Gerencie sua instância e a conexão atual.</span>
+            </div>
+          </div>
+          <div class="zc-wa-home-instance">
+            <div class="zc-wa-home-instance-ico" aria-hidden="true"><svg viewBox="0 0 256 256"><path d="M80,24h96a24,24,0,0,1,24,24V208a24,24,0,0,1-24,24H80a24,24,0,0,1-24-24V48A24,24,0,0,1,80,24Zm48,184a12,12,0,1,0,12,12A12,12,0,0,0,128,208Z"></path></svg></div>
+            <div class="zc-wa-home-meta">
+              <strong id="zcWaHomeInstanceName">Instância não selecionada</strong>
+              <span id="zcWaHomeInstancePhone">Selecione uma instância própria no topo</span>
+              <span class="zc-wa-home-status-pill" id="zcWaHomeInstanceStatus">Aguardando seleção</span>
+            </div>
+          </div>
+          <div class="zc-wa-home-card-foot">
+            <span></span>
+            <button type="button" class="zc-wa-home-btn" data-home-open-tab="profile">Gerenciar</button>
+          </div>
+        </article>
+      </section>
+    </div>
+
+    <div id="zcWaSettingsDetail" aria-hidden="true"></div>
+  </main>
+</div>
+
+<script src="/frontend/partials/sidebar-atendimento/logica/sidebar-atendimento.js?v=20260812-modular-v1"></script>
+<script src="/frontend/partials/sidebar-atendimento/navegacao/guards.js?v=20260812-modular-v1"></script>

@@ -29,7 +29,7 @@ import { loadSetores } from './setores.js';
 import { getDeptHorarioById } from './setores.js';
 import { renderDeptHintBySetorId, applyExpPersonalizarUI, buildHorarioModoPayload } from './horario.js';
 import {
-  fetchAvatarURLFor,
+  fetchAvatarThumbURLFor,
   setPerfilAvatar,
   bindAvatarDnDAndPaste,
   handleAvatarFile,
@@ -49,7 +49,7 @@ import {
 import {
   ensurePermsEdit,
   getPermsSelecionadasEdit
-} from './permissoes.js?v=colab-profile-help-20260727-1';
+} from './permissoes.js?v=colab-perm-inline-20260810-1';
 import {
   clearValidationErrors,
   validateFormLive,
@@ -58,6 +58,8 @@ import {
 import { loadColaboradores, renderLista } from './lista.js';
 
 let saveStatusTimer = null;
+let profileOpenRequestId = 0;
+const profileDetailsCache = new Map();
 
 function safeErrorText(value){
   const raw = String(value || '').trim();
@@ -350,11 +352,11 @@ function renderAdminBadge(colab){
 
 function ensureAccessExplanationBox(){
   // O guia grande poluía o wizard. Agora a explicação fica no ícone de ajuda
-  // do título da etapa Acesso. Também remove qualquer box antigo já injetado.
+  // do título da etapa Atendimento. Também remove qualquer box antigo já injetado.
   const old = document.getElementById('zc-colab-access-guide');
   if (old) old.remove();
 
-  const panelTitle = document.querySelector('#modal-perfil [data-panel="acessos"] .panel-title h3');
+  const panelTitle = document.querySelector('#modal-perfil [data-panel="atendimento"] .panel-title h3');
   if (!panelTitle) return null;
 
   let help = panelTitle.querySelector('#acesso-help-icon') || panelTitle.querySelector('#zc-colab-access-help');
@@ -364,24 +366,64 @@ function ensureAccessExplanationBox(){
     help.className = 'zc-help-icon';
     help.tabIndex = 0;
     help.setAttribute('role', 'button');
-    help.setAttribute('aria-label', 'Ajuda sobre acesso no atendimento');
+    help.setAttribute('aria-label', 'Ajuda sobre atendimento');
     help.innerHTML = '<i class="fa-regular fa-circle-question" aria-hidden="true"></i>';
     panelTitle.appendChild(help);
   }
 
-  help.dataset.help = 'Para ver uma conversa, o colaborador precisa ter acesso ao WhatsApp onde a mensagem chegou e ao departamento da conversa. Permissões definem ações como ver atendimento, enviar mensagem ou gerenciar equipe.';
+  help.dataset.help = 'Para ver uma conversa, o colaborador precisa ter acesso ao WhatsApp onde a mensagem chegou e ao departamento da conversa. A visibilidade define quais conversas aparecem; as permissões definem o que ele pode fazer no sistema.';
   return help;
 }
 
 async function loadColabFull(id){
-  const c = await apiGet(`/api/colaboradores/${id}`);
+  const numericId = Number(id || 0) || 0;
+  const cached = numericId ? profileDetailsCache.get(numericId) : null;
 
+  // As permissões não bloqueiam mais os dados do perfil. As duas chamadas
+  // começam juntas, mas assim que /colaboradores/:id responde o modal já pode
+  // atualizar telefone, cargo, horários etc.
+  const permsPromise = apiGet(`/api/permissoes/colaboradores/${id}`)
+    .then(p => Array.isArray(p) ? p : (p?.items || p?.data || []))
+    .catch(e => {
+      console.warn('[colaboradores] permissões do colaborador indisponíveis', e);
+      return cached?.permissoes || [];
+    });
+
+  let c;
   try {
-    const p = await apiGet(`/api/permissoes/colaboradores/${id}`);
-    c.permissoes = Array.isArray(p) ? p : (p?.items || p?.data || []);
+    c = await apiGet(`/api/colaboradores/${id}`);
   } catch (e) {
-    console.warn('[colaboradores] permissões do colaborador indisponíveis', e);
+    if (cached) return { ...cached };
+    throw e;
   }
+
+  c = c || {};
+  if (!Array.isArray(c.permissoes) && cached?.permissoes) {
+    c.permissoes = cached.permissoes;
+  }
+
+  if (numericId) profileDetailsCache.set(numericId, { ...c });
+
+  permsPromise.then(permissoes => {
+    c.permissoes = permissoes;
+    if (numericId) {
+      profileDetailsCache.set(numericId, { ...c, permissoes });
+    }
+
+    if (Number(state.viewing?.id || 0) === numericId) {
+      state.viewing.permissoes = permissoes;
+
+      const dPerms = els().dPerms;
+      if (dPerms && !els().perfilModal?.classList.contains('editing')) {
+        dPerms.innerHTML = '';
+        if (permissoes.length) {
+          permissoes.map(x => String(x.id ?? x)).forEach(p => dPerms.appendChild(chip(p)));
+        } else {
+          dPerms.textContent = '—';
+        }
+      }
+    }
+  });
 
   return c;
 }
@@ -420,6 +462,146 @@ function setPlaceholderPerfil(){
   if (vCargo) vCargo.textContent = '—';
   if (vExpIni) vExpIni.textContent = '—';
   if (vExpFim) vExpFim.textContent = '—';
+}
+
+function profileCompanyName(colab){
+  return String(
+    state.empresa?.nome ||
+    colab?.empresa_nome ||
+    colab?.empresa?.nome ||
+    colab?.empresa?.razao_social ||
+    ''
+  ).trim();
+}
+
+function renderPerfilImmediate(colab){
+  const {
+    perfilModal,
+    pTitle,
+    dStatus,
+    dStatusText,
+    dPerms,
+    ePerms
+  } = els();
+
+  if (!perfilModal || !colab) return;
+
+  // Garante que um modal fechado durante edição não reabra com inputs antigos.
+  exitInlineEdit(false);
+  clearValidationErrors();
+  clearWizardStepErrors(perfilModal);
+
+  state.viewing = colab;
+  state.showErrors = false;
+
+  const nome = coalesceName(colab);
+  const email = coalesceEmail(colab);
+  const cargoVal = coalesceCargo(colab);
+  const adm = isAdminFlag(colab);
+  const presence = formatPresence(colab);
+  const depId = coalesceDeptId(colab);
+  const depName =
+    coalesceDeptName(colab) ||
+    state.setores.find(s => String(s.id) === String(depId))?.nome ||
+    '';
+  const empresaNome = profileCompanyName(colab);
+
+  if (pTitle) pTitle.textContent = nome || 'Perfil do colaborador';
+
+  const pSubtitle = document.querySelector('#perfil-subtitle');
+  if (pSubtitle) pSubtitle.textContent = presence.label;
+
+  // Avatar nunca segura o restante do perfil. Mostra iniciais imediatamente e
+  // aproveita o cache da miniatura que a própria lista já começou a carregar.
+  setPerfilAvatar(nome, null);
+  const expectedId = Number(colab?.id || 0) || 0;
+  fetchAvatarThumbURLFor(colab)
+    .then(url => {
+      const currentId = Number(perfilModal.dataset.currentId || state.viewing?.id || 0) || 0;
+      if (perfilModal.getAttribute('aria-hidden') === 'false' && currentId === expectedId) {
+        setPerfilAvatar(nome, url);
+      }
+    })
+    .catch(() => {});
+
+  if (dStatus) {
+    dStatus.dataset.presence = presence.status;
+    dStatus.style.background = presence.color;
+  }
+  if (dStatusText) dStatusText.textContent = presence.label;
+  renderProfileAccountStatus(colab);
+  setScheduleExpanded(false);
+
+  const vNome = $('#v-nome');
+  const vEmailA = $('#v-email');
+  const vEmpresa = $('#v-empresa');
+  const vDepto = $('#v-depto');
+  const vTelA = $('#v-tel');
+  const vCargo = $('#v-cargo');
+  const vExpIni = $('#v-exp-ini');
+  const vExpFim = $('#v-exp-fim');
+
+  if (vNome) vNome.textContent = nome || '—';
+  if (vEmailA) {
+    vEmailA.textContent = email || '—';
+    vEmailA.href = email ? `mailto:${email}` : '#';
+  }
+  if (vEmpresa) vEmpresa.textContent = empresaNome || '—';
+  if (vDepto) vDepto.textContent = depName || '—';
+
+  const telRaw = coalescePhone(colab);
+  const telDisp = telRaw ? maskPhoneDisplay(telRaw.replace(/^\+/,'')) : '—';
+  if (vTelA) {
+    vTelA.textContent = telDisp;
+    vTelA.href = telRaw ? `tel:${telE164(telRaw)}` : '#';
+  }
+
+  if (vCargo) vCargo.textContent = adm ? '' : (cargoVal || '—');
+  renderAdminBadge(colab);
+
+  updateProfilePreview({
+    nome,
+    cargo: adm ? 'Administrador' : cargoVal,
+    empresa: empresaNome,
+    departamento: depName
+  });
+
+  const colIni = coalesceHorarioInicio(colab);
+  const colFim = coalesceHorarioFim(colab);
+  const depHor = getDeptHorarioById(depId, depName);
+
+  if (vExpIni) vExpIni.textContent = colIni || (depHor.ini ? `${depHor.ini} (padrão)` : '—');
+  if (vExpFim) vExpFim.textContent = colFim || (depHor.fim ? `${depHor.fim} (padrão)` : '—');
+
+  if (dPerms) {
+    dPerms.innerHTML = '';
+    const permsList = (colab.permissoes || []).map(x => String(x.id ?? x));
+    if (permsList.length) permsList.forEach(p => dPerms.appendChild(chip(p)));
+    else dPerms.textContent = '—';
+    dPerms.style.display = '';
+  }
+  if (ePerms) {
+    ePerms.style.display = 'none';
+    ePerms.innerHTML = '';
+  }
+
+  renderDeptHintBySetorId(depId, {
+    personalizar: !!(colIni || colFim),
+    setorNome: depName
+  });
+
+  ensureAccessExplanationBox();
+  renderConversationVisibility(colab, false);
+
+  // Nunca deixa dados do colaborador anterior aparecerem enquanto a etapa
+  // Atendimento ainda não foi carregada para este perfil.
+  const dDeptos = document.querySelector('#d-deptos');
+  const dInsts = document.querySelector('#d-insts');
+  if (dDeptos) dDeptos.textContent = 'Carregando departamentos…';
+  if (dInsts) dInsts.textContent = 'Carregando WhatsApps…';
+
+  applyAccessModeUI();
+  bindAvatarDnDAndPaste();
 }
 
 function swapFieldbox(boxId, html){
@@ -520,8 +702,8 @@ function renderConversationVisibility(colab = state.viewing, editable = false){
 
   if (summary) {
     summary.textContent = value === VISIBILIDADE_ATENDIMENTOS_PROPRIOS
-      ? 'Este colaborador poderá usar os WhatsApps permitidos, mas verá apenas conversas que estejam atribuídas a ele.'
-      : 'Este colaborador verá todas as conversas dentro dos WhatsApps e departamentos permitidos.';
+      ? 'Ele verá somente as próprias conversas. Conversas gerais ou aguardando atendimento não aparecerão até serem assumidas, atribuídas ou transferidas para ele.'
+      : 'Ele verá todas as conversas dos WhatsApps e departamentos permitidos, inclusive as que estiverem aguardando atendimento.';
   }
 }
 
@@ -532,6 +714,60 @@ function getConversationVisibilityEdit(){
   return normalizeConversationVisibility(
     selected?.value || state.viewing?.visibilidade_atendimentos
   );
+}
+
+function getProfileAccountStatus(colab){
+  const isCreate = els().perfilModal?.dataset.mode === 'create' || !Number(colab?.id || 0);
+  if (isCreate) return { label:'Novo perfil', cls:'is-warning' };
+
+  const raw = String(colab?.status || colab?.situacao || '').trim().toLowerCase();
+  const inactive = (
+    colab?.ativo === false ||
+    colab?.active === false ||
+    colab?.bloqueado === true ||
+    colab?.disabled === true ||
+    colab?.inativo === true ||
+    ['offline','inativo','bloqueado','disabled'].includes(raw)
+  );
+
+  if (inactive) return { label:'Inativo', cls:'is-offline' };
+  if (colab?.troca_senha_pendente) return { label:'Trocar senha', cls:'is-warning' };
+  if (colab?.convite_pendente) return { label:'Convite pendente', cls:'is-warning' };
+  if (colab?.tem_usuario === false) return { label:'Sem login', cls:'is-warning' };
+
+  return { label:'Ativo', cls:'is-active' };
+}
+
+function renderProfileAccountStatus(colab){
+  const badge = document.querySelector('#side-preview-account-status');
+  if (!badge) return;
+
+  const status = getProfileAccountStatus(colab);
+  badge.classList.remove('is-active','is-warning','is-offline');
+  badge.classList.add(status.cls);
+  badge.innerHTML = '<span aria-hidden="true"></span>' + status.label;
+}
+
+function setScheduleExpanded(expanded){
+  const section = document.querySelector('#modal-perfil .colab-schedule-block');
+  const toggle = document.querySelector('#colab-expediente-toggle');
+  const content = document.querySelector('#colab-expediente-content');
+  if (!section || !toggle || !content) return;
+
+  const open = !!expanded;
+  section.classList.toggle('is-collapsed', !open);
+  toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+  content.hidden = !open;
+}
+
+function bindScheduleAccordion(){
+  const toggle = document.querySelector('#colab-expediente-toggle');
+  if (!toggle || toggle.dataset.boundScheduleAccordion === '1') return;
+
+  toggle.dataset.boundScheduleAccordion = '1';
+  toggle.addEventListener('click', () => {
+    setScheduleExpanded(toggle.getAttribute('aria-expanded') !== 'true');
+  });
 }
 
 function updateProfilePreview({ nome = '', cargo = '', empresa = '', departamento = '' } = {}){
@@ -572,15 +808,24 @@ export async function renderPerfilView(colab){
   const vExpIni = $('#v-exp-ini');
   const vExpFim = $('#v-exp-fim');
 
-  const empresa = await loadEmpresa();
-
-  if (!state.setores.length) {
-    try {
-      await loadSetores();
-    } catch (e) {
-      console.warn('[colaboradores] loadSetores dentro do perfil falhou', e);
-    }
+  // Assim que o endpoint principal responde, atualiza os campos básicos sem
+  // esperar empresa, departamentos ou avatar.
+  if (perfilModal?.dataset.mode !== 'create') {
+    renderPerfilImmediate(colab);
   }
+
+  const empresaPromise = loadEmpresa();
+  const setoresPromise = !state.setores.length
+    ? loadSetores().catch(e => {
+        console.warn('[colaboradores] loadSetores dentro do perfil falhou', e);
+      })
+    : Promise.resolve();
+
+  const [empresa] = await Promise.all([empresaPromise, setoresPromise]);
+
+  // Se a pessoa começou a editar enquanto dados auxiliares carregavam, não
+  // deixa a conclusão assíncrona remontar a visualização por cima do formulário.
+  if (state.inlineEdit || perfilModal?.classList.contains('editing')) return;
 
   if (pTitle) {
     pTitle.textContent = perfilModal?.dataset.mode === 'create'
@@ -596,14 +841,25 @@ export async function renderPerfilView(colab){
       : presence.label;
   }
 
-  const photoURL = await fetchAvatarURLFor(colab);
-  setPerfilAvatar(coalesceName(colab), photoURL);
+  const avatarName = coalesceName(colab);
+  setPerfilAvatar(avatarName, null);
+  const expectedAvatarId = Number(colab?.id || 0) || 0;
+  fetchAvatarThumbURLFor(colab)
+    .then(photoURL => {
+      const currentId = Number(perfilModal?.dataset.currentId || state.viewing?.id || 0) || 0;
+      if (perfilModal?.getAttribute('aria-hidden') === 'false' && currentId === expectedAvatarId) {
+        setPerfilAvatar(avatarName, photoURL);
+      }
+    })
+    .catch(() => {});
 
   if (dStatus) {
     dStatus.dataset.presence = presence.status;
     dStatus.style.background = presence.color;
   }
   if (dStatusText) dStatusText.textContent = presence.label;
+  renderProfileAccountStatus(colab);
+  setScheduleExpanded(false);
 
   const nome = coalesceName(colab);
   const email = coalesceEmail(colab);
@@ -717,8 +973,26 @@ export async function renderPerfilView(colab){
     if (deptActions) deptActions.style.display = 'none';
     if (instActions) instActions.style.display = 'none';
   } else {
-    await renderDepartamentosView(colab);
-    await renderInstsView(colab);
+    const dDeptos = document.querySelector('#d-deptos');
+    const eDeptos = document.querySelector('#e-deptos');
+    const dInsts = document.querySelector('#d-insts');
+    const eInsts = document.querySelector('#e-insts');
+    const deptActions = document.querySelector('#dept-actions');
+    const instActions = document.querySelector('#inst-actions');
+
+    if (dDeptos) { dDeptos.textContent = 'Carregando departamentos…'; dDeptos.style.display = ''; }
+    if (eDeptos) { eDeptos.innerHTML = ''; eDeptos.style.display = 'none'; }
+    if (dInsts) { dInsts.textContent = 'Carregando WhatsApps…'; dInsts.style.display = ''; }
+    if (eInsts) { eInsts.innerHTML = ''; eInsts.style.display = 'none'; }
+    if (deptActions) deptActions.style.display = 'none';
+    if (instActions) instActions.style.display = 'none';
+
+    delete perfilModal.dataset.deptosViewLoaded;
+    delete perfilModal.dataset.instsViewLoaded;
+
+    if (activeWizardStep(perfilModal).key === 'atendimento') {
+      window.setTimeout(() => ensureLazyViewStep('atendimento'), 0);
+    }
   }
 
   if (avatarHint) {
@@ -807,6 +1081,8 @@ function resetLazyEditFlags(){
   delete perfilModal.dataset.deptosEditLoaded;
   delete perfilModal.dataset.instsEditLoaded;
   delete perfilModal.dataset.permsEditLoaded;
+  delete perfilModal.dataset.deptosViewLoaded;
+  delete perfilModal.dataset.instsViewLoaded;
 }
 
 
@@ -979,9 +1255,35 @@ function applyAccessModeUI(){
   const acessoHelp = document.querySelector('#acesso-help-icon');
   if (acessoHelp) {
     acessoHelp.dataset.help = isCreate
-      ? 'Configure como o colaborador criará a senha e quais atendimentos poderá acessar.'
+      ? 'Escolha como o colaborador criará a senha. Departamentos e WhatsApps são configurados na etapa Atendimento.'
       : 'A edição não altera a senha automaticamente. Selecione e-mail ou senha temporária apenas quando quiser redefinir o acesso.';
   }
+}
+
+function ensureLazyViewStep(key){
+  const { perfilModal } = els();
+  if (!perfilModal || state.inlineEdit || perfilModal.dataset.mode === 'create') return;
+
+  const step = key || activeWizardStep(perfilModal).key || 'perfil';
+  if (step !== 'atendimento') return;
+
+  function runOnce(flag, loader){
+    if (perfilModal.dataset[flag] === '1' || perfilModal.dataset[flag] === 'loading') return;
+
+    perfilModal.dataset[flag] = 'loading';
+    Promise.resolve()
+      .then(loader)
+      .then(() => {
+        perfilModal.dataset[flag] = '1';
+      })
+      .catch(e => {
+        delete perfilModal.dataset[flag];
+        console.warn('[colaboradores] falha ao carregar dados de visualização', step, e);
+      });
+  }
+
+  runOnce('deptosViewLoaded', () => renderDepartamentosView(state.viewing));
+  runOnce('instsViewLoaded', () => renderInstsView(state.viewing));
 }
 
 function ensureLazyEditStep(key){
@@ -1006,7 +1308,7 @@ function ensureLazyEditStep(key){
       });
   }
 
-  if (step === 'acessos') {
+  if (step === 'atendimento') {
     runOnce('deptosEditLoaded', ensureDepartamentosEdit);
     runOnce('instsEditLoaded', ensureInstsEdit);
   }
@@ -1430,7 +1732,7 @@ export async function saveInline(){
     }
 
     if (newPass.length < 6 || newPass.length > 72) {
-      goWizardStep(perfilModal, 'acessos');
+      goWizardStep(perfilModal, 'login');
       toast(
         mode === 'create'
           ? 'Defina uma senha temporária entre 6 e 72 caracteres.'
@@ -1529,6 +1831,7 @@ export async function saveInline(){
       state.newAvatarFile = null;
       state.showErrors = false;
       state.viewing = fresh;
+      if (created?.id) profileDetailsCache.set(Number(created.id), { ...fresh });
 
       perfilModal.dataset.mode = 'view';
       perfilModal.dataset.currentId = String(created.id);
@@ -1703,6 +2006,7 @@ export async function saveInline(){
 
     state.showErrors = false;
     state.viewing = fresh;
+    if (id) profileDetailsCache.set(Number(id), { ...fresh });
 
     await loadColaboradores();
     renderLista();
@@ -1769,43 +2073,250 @@ export async function saveInline(){
   }
 }
 
-export async function openPerfil(id){
+function captureCurrentEditValues(){
+  return {
+    nome: document.querySelector('#e-nome')?.value ?? '',
+    email: document.querySelector('#e-email')?.value ?? '',
+    telefone: document.querySelector('#e-tel')?.value ?? '',
+    cargo: document.querySelector('#e-cargo')?.value ?? '',
+    expIni: document.querySelector('#e-exp-ini')?.value ?? '',
+    expFim: document.querySelector('#e-exp-fim')?.value ?? '',
+    expPersonalizar: !!document.querySelector('#e-exp-personalizar')?.checked
+  };
+}
+
+function hydrateDirectEditFromFull(colab, initialValues = {}){
+  const { perfilModal } = els();
+  if (!colab || !perfilModal || !state.inlineEdit || !perfilModal.classList.contains('editing')) return;
+
+  const merged = {
+    ...(state.viewing || {}),
+    ...colab
+  };
+  state.viewing = merged;
+
+  const setIfUntouched = (selector, initialValue, nextValue) => {
+    const input = document.querySelector(selector);
+    if (!input) return;
+
+    const current = String(input.value ?? '');
+    const baseline = String(initialValue ?? '');
+    if (current !== baseline) return;
+
+    input.value = String(nextValue ?? '');
+  };
+
+  setIfUntouched('#e-nome', initialValues.nome, coalesceName(merged) || '');
+  setIfUntouched('#e-email', initialValues.email, coalesceEmail(merged) || '');
+  setIfUntouched(
+    '#e-tel',
+    initialValues.telefone,
+    coalescePhone(merged) ? maskPhoneBR(coalescePhone(merged)) : ''
+  );
+  setIfUntouched('#e-cargo', initialValues.cargo, coalesceCargo(merged) || '');
+  const fullExpIni = coalesceHorarioInicio(merged) || '';
+  const fullExpFim = coalesceHorarioFim(merged) || '';
+  setIfUntouched('#e-exp-ini', initialValues.expIni, fullExpIni);
+  setIfUntouched('#e-exp-fim', initialValues.expFim, fullExpFim);
+
+  const expToggle = document.querySelector('#e-exp-personalizar');
+  if (
+    expToggle &&
+    expToggle.checked === !!initialValues.expPersonalizar &&
+    String(document.querySelector('#e-exp-ini')?.value ?? '') === String(fullExpIni) &&
+    String(document.querySelector('#e-exp-fim')?.value ?? '') === String(fullExpFim)
+  ) {
+    expToggle.checked = !!(fullExpIni || fullExpFim);
+  }
+
+  const depId = coalesceDeptId(merged);
+  const depName =
+    coalesceDeptName(merged) ||
+    state.setores.find(s => String(s.id) === String(depId))?.nome ||
+    '';
+  const empresaNome = profileCompanyName(merged);
+  const presence = formatPresence(merged);
+
+  const pTitle = document.querySelector('#perfil-title');
+  if (pTitle) pTitle.textContent = coalesceName(merged) || 'Perfil do colaborador';
+
+  const pSubtitle = document.querySelector('#perfil-subtitle');
+  if (pSubtitle) pSubtitle.textContent = presence.label;
+
+  const vEmpresa = document.querySelector('#v-empresa');
+  if (vEmpresa && empresaNome) vEmpresa.textContent = empresaNome;
+
+  const dStatus = els().dStatus;
+  const dStatusText = els().dStatusText;
+  if (dStatus) {
+    dStatus.dataset.presence = presence.status;
+    dStatus.style.background = presence.color;
+  }
+  if (dStatusText) dStatusText.textContent = presence.label;
+
+  renderProfileAccountStatus(merged);
+  updateProfilePreview({
+    nome: document.querySelector('#e-nome')?.value || coalesceName(merged),
+    cargo: document.querySelector('#e-cargo')?.value || coalesceCargo(merged),
+    empresa: empresaNome,
+    departamento: depName
+  });
+
+  applyAccessModeUI();
+  applyExpPersonalizarUI();
+  validateFormLive(false);
+}
+
+export async function openPerfil(id, options = {}){
   const { perfilModal, pEdit } = els();
 
   clearSaveStatus();
 
-  try {
-    if (Number.isNaN(Number(id)) || !Number(id)){
-      toast('ID do colaborador inválido.', 'err');
-      return;
-    }
+  const numericId = Number(id || 0) || 0;
+  if (!numericId){
+    toast('ID do colaborador inválido.', 'err');
+    return;
+  }
 
+  const requestId = ++profileOpenRequestId;
+  const directEdit = options === true || options?.edit === true;
+
+  if (directEdit && !hasPerm(EDIT_PERM)) {
+    toast('Sem permissão para editar.', 'warn');
+    return;
+  }
+
+  try {
     resetLazyEditFlags();
     perfilModal.dataset.mode = 'view';
+    perfilModal.dataset.currentId = String(numericId);
     perfilModal.setAttribute('aria-hidden','false');
     document.documentElement.classList.add('modal-open');
 
-    setPlaceholderPerfil();
+    // A lista já possui nome, e-mail, cargo, departamento, presença etc.
+    // Usa esses dados no mesmo frame do clique em vez de abrir o modal vazio.
+    const cachedFull = profileDetailsCache.get(numericId);
+    const listPreview = state.colaboradores.find(
+      item => Number(item?.id || 0) === numericId
+    );
+    const preview = cachedFull || listPreview;
 
-    const colab = await loadColabFull(id);
-
-    await renderPerfilView(colab);
-
-    perfilModal.dataset.currentId = String(id);
-
-    if (pEdit) {
-      pEdit.style.display = hasPerm('colaboradores.gerenciar') ? '' : 'none';
-    }
+    if (preview) renderPerfilImmediate({ ...preview });
+    else setPlaceholderPerfil();
 
     const { pSave, pCancel, pClose, pClose2 } = els();
-    if (pSave) pSave.style.display = 'none';
-    if (pCancel) pCancel.style.display = 'none';
     if (pClose) pClose.style.display = '';
     if (pClose2) pClose2.style.display = 'none';
+
+    let directEditInitialValues = null;
+
+    if (directEdit && preview) {
+      // O lápis significa editar: entra no editor no mesmo clique, usando os
+      // dados que a lista já possui. A API completa apenas enriquece o formulário
+      // depois, sem exigir um segundo clique e sem apagar o que o usuário digitou.
+      enterInlineEdit();
+      directEditInitialValues = captureCurrentEditValues();
+    } else {
+      // Na abertura apenas para visualização o botão Editar continua disponível,
+      // mas só é habilitado quando o cadastro completo termina de carregar.
+      if (pEdit) {
+        pEdit.style.display = hasPerm(EDIT_PERM) ? '' : 'none';
+        pEdit.disabled = true;
+        pEdit.setAttribute('aria-busy', 'true');
+        pEdit.title = 'Carregando os dados completos para edição…';
+      }
+
+      if (pSave) pSave.style.display = 'none';
+      if (pCancel) pCancel.style.display = 'none';
+    }
+
+    updateWizardFooter(perfilModal);
+
+    // Busca o cadastro completo e permissões em paralelo. Quando terminar,
+    // enriquece os dados que já estão visíveis, sem piscar para placeholders.
+    const colab = await loadColabFull(numericId);
+
+    if (
+      requestId !== profileOpenRequestId ||
+      perfilModal.getAttribute('aria-hidden') !== 'false' ||
+      Number(perfilModal.dataset.currentId || 0) !== numericId
+    ) {
+      return;
+    }
+
+    // Fallback: se a lista não tinha preview (situação rara), entra em edição
+    // assim que o endpoint principal responder, ainda sem exigir outro clique.
+    if (directEdit && !state.inlineEdit) {
+      renderPerfilImmediate({ ...colab });
+      enterInlineEdit();
+      directEditInitialValues = captureCurrentEditValues();
+    }
+
+    let renderPromise;
+
+    if (directEdit && state.inlineEdit) {
+      hydrateDirectEditFromFull(colab, directEditInitialValues || {});
+      // Empresa e nomes auxiliares podem chegar depois, mas não bloqueiam edição.
+      renderPromise = Promise.all([
+        loadEmpresa().catch(() => null),
+        state.setores.length ? Promise.resolve() : loadSetores().catch(() => null)
+      ]).then(() => {
+        if (
+          requestId === profileOpenRequestId &&
+          perfilModal.getAttribute('aria-hidden') === 'false' &&
+          Number(perfilModal.dataset.currentId || 0) === numericId &&
+          state.inlineEdit
+        ) {
+          hydrateDirectEditFromFull(colab, directEditInitialValues || {});
+        }
+      });
+    } else {
+      renderPromise = renderPerfilView(colab);
+
+      // renderPerfilView já executou a parte síncrona com os dados completos.
+      // A partir daqui editar é seguro; empresa/departamentos podem terminar
+      // depois sem bloquear a ação.
+      if (pEdit && requestId === profileOpenRequestId) {
+        pEdit.disabled = false;
+        pEdit.removeAttribute('aria-busy');
+        pEdit.title = 'Editar perfil';
+      }
+    }
+
+    await renderPromise;
+
+    if (
+      requestId !== profileOpenRequestId ||
+      perfilModal.getAttribute('aria-hidden') !== 'false' ||
+      Number(perfilModal.dataset.currentId || 0) !== numericId
+    ) {
+      return;
+    }
+
     updateWizardFooter(perfilModal);
   } catch (e) {
+    if (requestId !== profileOpenRequestId) return;
     console.error(e);
-    toast('Não foi possível abrir o perfil.', 'err');
+
+    // Se já havia dados da lista, mantém o perfil útil na tela e avisa apenas
+    // que os detalhes adicionais não puderam ser atualizados.
+    const hasPreview = Number(state.viewing?.id || 0) === numericId;
+    if (pEdit && !directEdit) {
+      pEdit.disabled = true;
+      pEdit.removeAttribute('aria-busy');
+      pEdit.title = hasPreview
+        ? 'Não foi possível carregar todos os dados necessários para editar.'
+        : 'Editar perfil';
+    }
+
+    toast(
+      directEdit && hasPreview
+        ? 'A edição foi aberta com os dados disponíveis, mas alguns detalhes não puderam ser atualizados agora.'
+        : hasPreview
+          ? 'O perfil foi aberto, mas alguns detalhes ainda não puderam ser atualizados.'
+          : 'Não foi possível abrir o perfil.',
+      hasPreview ? 'warn' : 'err'
+    );
   }
 }
 
@@ -1813,6 +2324,8 @@ export function closePerfil(){
   const { perfilModal } = els();
 
   if (state.saving) return;
+
+  profileOpenRequestId += 1;
 
   clearSaveStatus();
   clearValidationErrors();
@@ -1828,6 +2341,13 @@ export function closePerfil(){
 
   state.newAvatarFile = null;
   state.showErrors = false;
+
+  const editButton = els().pEdit;
+  if (editButton) {
+    editButton.disabled = false;
+    editButton.removeAttribute('aria-busy');
+    editButton.title = 'Editar perfil';
+  }
 
   $('#avatar-wrap')?.classList.remove('drag-over');
 }
@@ -1931,7 +2451,7 @@ export async function openNovo(){
 }
 
 
-const WIZARD_STEPS = ['perfil', 'acessos', 'permissoes'];
+const WIZARD_STEPS = ['perfil', 'login', 'atendimento', 'permissoes'];
 
 function activeWizardStep(modal){
   const active = modal?.querySelector('.colab-tab.active');
@@ -1943,8 +2463,12 @@ function activeWizardStep(modal){
 function wizardStepForField(field){
   const id = String(field?.id || '');
 
-  if (id === 'e-senha' || field?.closest?.('[data-panel="acessos"]')) {
-    return 'acessos';
+  if (id === 'e-senha' || field?.closest?.('[data-panel="login"]')) {
+    return 'login';
+  }
+
+  if (field?.closest?.('[data-panel="atendimento"]')) {
+    return 'atendimento';
   }
 
   if (field?.closest?.('[data-panel="permissoes"]')) {
@@ -1975,6 +2499,10 @@ function focusValidationField(modal, field, stepKey){
   const targetStep = stepKey || wizardStepForField(field);
   const currentStep = activeWizardStep(modal).key;
 
+  if (field?.closest?.('#colab-expediente-content')) {
+    setScheduleExpanded(true);
+  }
+
   if (targetStep && currentStep !== targetStep) {
     goWizardStep(modal, targetStep);
   }
@@ -2004,8 +2532,14 @@ function validateWizardStep(modal, stepKey, { notify = true, focus = true } = {}
 
   if (stepKey === 'perfil') {
     check = validateFormLive(true, { scope: 'perfil' });
-  } else if (stepKey === 'acessos') {
+  } else if (stepKey === 'login') {
+    // A validação já existente de "acessos" valida somente a senha temporária.
+    // Mantemos esse contrato para não duplicar a regra de 6–72 caracteres.
     check = validateFormLive(true, { scope: 'acessos' });
+  } else if (stepKey === 'atendimento') {
+    // Departamentos e WhatsApps são opcionais. A etapa só organiza a distribuição
+    // de atendimento; nenhuma seleção é obrigatória para salvar o colaborador.
+    check = { ok: true, msgs: [], fields: [] };
   }
 
   const tab = modal?.querySelector(`.colab-tab[data-tab="${stepKey}"]`);
@@ -2184,7 +2718,9 @@ function bindWizardModal(){
     btn.addEventListener('click', () => {
       setTimeout(() => {
         updateWizardFooter(modal);
-        ensureLazyEditStep(activeWizardStep(modal).key);
+        const stepKey = activeWizardStep(modal).key;
+        ensureLazyViewStep(stepKey);
+        ensureLazyEditStep(stepKey);
       }, 20);
     });
   });
@@ -2197,6 +2733,7 @@ export function bindModal(){
   state.didBindModal = true;
 
   bindWizardModal();
+  bindScheduleAccordion();
 
   const {
     perfilModal,

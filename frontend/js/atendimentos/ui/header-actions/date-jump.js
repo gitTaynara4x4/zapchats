@@ -1421,6 +1421,9 @@
       }
     }
 
+    const convKind = String(params.conversationKey || '').split(':', 1)[0].toLowerCase();
+    if (convKind === 'c' || convKind === 'g') qs.set('kind', convKind);
+
     const url =
       `/api/atendimento/conversas/${encodeURIComponent(params.clienteId)}/mensagens/por-data?${qs.toString()}`;
 

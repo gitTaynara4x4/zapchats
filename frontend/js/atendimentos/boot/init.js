@@ -7,7 +7,7 @@ import { salvarNoCache, renderHistoricoDoCache } from '../domain/historico.js';
 
 // Base unificada de histórico local
 import { getHist } from '../domain/hist-cache.js';
-import { abrirPerfilAtual } from '../ui/perfil.js';
+import { abrirPerfilAtual } from '../ui/perfil.js?v=20260811-profile-gallery-v1';
 import '../ui/loading-guard.js';
 
 // ====== Flag global: esconder banner do topo (Operadora: …) ======
@@ -1413,6 +1413,7 @@ async function ensureMensagensCarregadas(conversationRef, opts = {}) {
       if (/^\d+$/.test(s)) qs.set('instancia_id', s);
       else qs.set('instance', s);
     }
+    if (ref.kind === 'c' || ref.kind === 'g') qs.set('kind', ref.kind);
 
     const url = `/api/atendimento/conversas/${encodeURIComponent(entityId)}/mensagens?${qs.toString()}`;
 

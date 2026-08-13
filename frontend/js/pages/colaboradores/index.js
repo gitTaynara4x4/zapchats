@@ -12,8 +12,8 @@ import {
   bindLista,
   applyPresenceUpdate,
   applyPresenceSnapshot
-} from './lista.js?v=colab-session-cache-20260726-1';
-import { bindModal } from './modal.js?v=colab-visibility-20260728-1';
+} from './lista.js?v=colab-direct-edit-20260810-1';
+import { bindModal } from './modal.js?v=colab-perm-inline-20260810-1';
 
 import { initColaboradoresTabs } from './ui/tabs.js?v=colab-required-20260713';
 import { initColaboradoresSelects } from './ui/selects.js?v=colab-select-fix-1';

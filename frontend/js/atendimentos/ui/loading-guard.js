@@ -9,7 +9,7 @@
 
   const START = Date.now();
   const MAX_GLOBAL_LOADING_MS = 9000;
-  const MAX_CHAT_LOADING_MS = 52000;
+  const MAX_CHAT_LOADING_MS = 180000;
   const MAX_LIST_LOADING_MS = 25000;
 
   function now() { return Date.now(); }
@@ -150,20 +150,22 @@
         return;
       }
 
-      hardHideChatLoading('hist-timeout');
+      hardHideChatLoading('hist-timeout-soft');
+      try {
+        const key = hist.dataset.conversationKey || hist.dataset.conversationId || hist.dataset.convKey;
+        if (key && typeof window.zcShowConversationSoftRetry === 'function') {
+          window.zcShowConversationSoftRetry({ key }, key, 'Carregando conversa…');
+          return;
+        }
+      } catch {}
       hist.style.display = 'flex';
+      hist.setAttribute('aria-busy', 'true');
       hist.innerHTML = `
-        <div class="hist-empty-state hist-empty-error">
-          <div class="hist-empty-icon"><i class="fa-solid fa-triangle-exclamation"></i></div>
-          <div class="hist-empty-title">A conversa demorou para carregar.</div>
-          <button type="button" class="hist-retry-btn" data-zc-retry-hist="1">Tentar novamente</button>
+        <div class="hist-initial-loading" data-hist-initial-loading="1">
+          <div class="spinner" aria-hidden="true"></div>
+          <div class="txt">Carregando conversa…</div>
+          <div class="subtxt">O histórico está demorando um pouco mais. Continuamos tentando.</div>
         </div>`;
-      hist.querySelector('[data-zc-retry-hist="1"]')?.addEventListener('click', () => {
-        try {
-          const key = hist.dataset.conversationKey || hist.dataset.conversationId || hist.dataset.convKey;
-          if (key && typeof window.selecionarClienteObj === 'function') window.selecionarClienteObj(key, { forceReload: true, retry: true, timeoutMs: 60000 });
-        } catch {}
-      });
     } catch {}
   }
 

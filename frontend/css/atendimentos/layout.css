@@ -34,7 +34,6 @@
   background:var(--bg);
   height:100vh;
   position:relative;
-  scrollbar-gutter:stable both-edges;
 }
 
 main{
@@ -46,7 +45,6 @@ main{
   background:var(--bg);
   height:100vh;
   position:relative;
-  scrollbar-gutter:stable both-edges;
 }
 
 header,

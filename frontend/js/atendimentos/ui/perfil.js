@@ -17,6 +17,8 @@
 // - v12: ao trocar de cliente, limpa avatar/foto antiga antes de aplicar o novo perfil
 // - v13: mostra loading visual no avatar/drawer durante carregamento/atualização
 
+import { getClientPermissions } from '../core/client-permissions.js';
+
 const $ = (s, r = document) => r.querySelector(s);
 const on = (el, ev, fn) => el && el.addEventListener(ev, fn);
 
@@ -29,8 +31,17 @@ let PERFIL_KIND_ATUAL = 'cliente';
 let drawerRefs = null;
 let drawerBound = false;
 
+let PERFIL_MEDIA_PREVIEW_ITEMS = [];
 let PERFIL_MEDIA_ITEMS = [];
 let PERFIL_MEDIA_FILTER = 'all';
+let PERFIL_MEDIA_OFFSET = 0;
+let PERFIL_MEDIA_HAS_MORE = false;
+let PERFIL_MEDIA_TOTAL = 0;
+let PERFIL_MEDIA_LOADING = false;
+let PERFIL_MEDIA_ERROR = '';
+let PERFIL_MEDIA_COUNTS = null;
+let PERFIL_MEDIA_LOAD_SEQ = 0;
+const PERFIL_MEDIA_PAGE_SIZE = 24;
 let mediaModalRefs = null;
 let mediaModalBound = false;
 
@@ -40,7 +51,6 @@ let mediaModalBound = false;
 
 const PERFIL_CACHE_TTL_MS = Number(window.ZC_PERFIL_CACHE_TTL_MS || 90_000);
 const PERFIL_STALE_CACHE_TTL_MS = Number(window.ZC_PERFIL_STALE_CACHE_TTL_MS || 10 * 60_000);
-const PERFIL_MEDIA_CACHE_TTL_MS = Number(window.ZC_PERFIL_MEDIA_CACHE_TTL_MS || 45_000);
 
 const perfilMemoryCache = new Map();
 
@@ -61,6 +71,15 @@ function isPerfilAbortLike(err) {
   if (err.name === 'AbortError') return true;
   const msg = String(err.message || err.reason || err || '').toLowerCase();
   return msg.includes('atendimento-fetch-timeout') || msg.includes('abortado');
+}
+
+function mediaGalleryErrorMessage(err) {
+  const raw = String(err?.message || err?.reason || err || '').trim();
+  const low = raw.toLowerCase();
+  if (err?.name === 'AbortError' || low.includes('atendimento-fetch-timeout') || low.includes('timeout')) {
+    return 'A galeria demorou mais que o esperado. Tente novamente.';
+  }
+  return raw || 'Não foi possível carregar a galeria completa.';
 }
 
 function perfilCacheBucket(type, kind, id) {
@@ -882,12 +901,13 @@ async function preencherPorCEP(cep) {
 }
 
 /* =========================
-   HELPERS DE MÍDIA
+   HELPERS DE MÍDIA / LINKS
    ========================= */
 
 function mediaCategory(item = {}) {
   const raw = String(item?.categoria || item?.tipo || item?.mime_group || '').toLowerCase();
 
+  if (raw.includes('link') || String(item?.source || '').toLowerCase() === 'link') return 'link';
   if (raw.includes('imagem') || raw.includes('image') || raw.includes('foto') || raw.includes('sticker')) return 'imagem';
   if (raw.includes('video') || raw.includes('vídeo')) return 'video';
   if (raw.includes('audio') || raw.includes('áudio') || raw.includes('ptt') || raw.includes('voice')) return 'audio';
@@ -904,7 +924,7 @@ function mediaThumb(item = {}) {
 }
 
 function mediaTitle(item = {}) {
-  return item?.nome_original || item?.filename || item?.file_name || item?.title || 'mídia';
+  return item?.title || item?.nome_original || item?.filename || item?.file_name || 'mídia';
 }
 
 function isVisualMedia(item = {}) {
@@ -915,10 +935,13 @@ function isVisualMedia(item = {}) {
 function calcMediaCounts(items = []) {
   const out = {
     total: 0,
+    midias: 0,
     imagens: 0,
     videos: 0,
     audios: 0,
     documentos: 0,
+    links: 0,
+    fotos_videos: 0,
   };
 
   for (const item of items) {
@@ -929,9 +952,12 @@ function calcMediaCounts(items = []) {
     if (cat === 'imagem') out.imagens += 1;
     else if (cat === 'video') out.videos += 1;
     else if (cat === 'audio') out.audios += 1;
+    else if (cat === 'link') out.links += 1;
     else out.documentos += 1;
   }
 
+  out.midias = out.total - out.links;
+  out.fotos_videos = out.imagens + out.videos;
   return out;
 }
 
@@ -940,7 +966,7 @@ function previewMediaItems(items = []) {
 
   if (visuals.length) return visuals.slice(0, 4);
 
-  return items.slice(0, 4);
+  return items.filter((item) => mediaCategory(item) !== 'link').slice(0, 4);
 }
 
 function renderMediaPreviewItem(item = {}, idx = 0) {
@@ -1012,6 +1038,21 @@ function renderMediaModalItem(item = {}) {
     `;
   }
 
+  if (cat === 'link') {
+    const excerpt = escapeHtml(String(item?.excerpt || '').trim());
+    return `
+      <a class="zcPerfilMediaModalFile is-link" href="${url}" target="_blank" rel="noopener noreferrer">
+        <span class="zcPerfilMediaModalFileIco"><i class="fa-solid fa-link"></i></span>
+        <span class="zcPerfilMediaModalFileBody">
+          <strong>${title || 'Link'}</strong>
+          <small class="zcPerfilMediaModalUrl">${url}</small>
+          ${excerpt ? `<small class="zcPerfilMediaModalExcerpt">${excerpt}</small>` : ''}
+        </span>
+        <span class="zcPerfilMediaModalExternal"><i class="fa-solid fa-arrow-up-right-from-square"></i></span>
+      </a>
+    `;
+  }
+
   if (cat === 'audio') {
     return `
       <a class="zcPerfilMediaModalFile" href="${url}" target="_blank" rel="noopener">
@@ -1035,55 +1076,155 @@ function renderMediaModalItem(item = {}) {
   `;
 }
 
-async function tryLoadAllMedia({ bust = false } = {}) {
+function mediaGalleryOwner() {
+  if (!EMPRESA_ID) return null;
+
   if (PERFIL_KIND_ATUAL === 'grupo') {
-    return PERFIL_MEDIA_ITEMS;
+    const gid = Number(getGrupoId(PERFIL_GRUPO_ID) || PERFIL_GRUPO_ID || 0);
+    if (!gid) return null;
+    return {
+      kind: 'grupo',
+      id: gid,
+      key: `grupo:${gid}`,
+      endpoint: `/api/atendimento/grupos/${gid}/profile/media`,
+    };
   }
 
-  const cid = getClienteIdFromCurrentSelection() || PERFIL_CLIENTE_ID;
+  const cid = Number(getClienteIdFromCurrentSelection() || PERFIL_CLIENTE_ID || 0);
+  if (!cid) return null;
+  return {
+    kind: 'cliente',
+    id: cid,
+    key: `cliente:${cid}`,
+    endpoint: `/api/atendimento/clientes/${cid}/profile/media`,
+  };
+}
 
-  if (!cid || !EMPRESA_ID) return PERFIL_MEDIA_ITEMS;
+function mediaItemKey(item = {}) {
+  const source = String(item?.source || mediaCategory(item) || 'item');
+  return `${source}:${String(item?.id ?? item?.url ?? '')}`;
+}
 
-  if (!bust) {
-    const cached = getPerfilCache('media', 'cliente', cid);
+function mergeUniqueMediaItems(base = [], incoming = []) {
+  const out = [];
+  const seen = new Set();
 
-    if (cached.hit && cached.fresh && Array.isArray(cached.value)) {
-      PERFIL_MEDIA_ITEMS = cached.value;
-      return PERFIL_MEDIA_ITEMS;
-    }
+  for (const item of [...base, ...incoming]) {
+    if (!item) continue;
+    const key = mediaItemKey(item);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(item);
   }
+
+  return out;
+}
+
+function applyMediaCountsToDrawer(counts = {}) {
+  const r = ensureDrawer();
+  const c = counts || {};
+
+  if (r.mediaTotal) r.mediaTotal.textContent = `${Number(c.total || 0)} item(ns)`;
+  if (r.mediaImagens) r.mediaImagens.textContent = String(Number(c.imagens || 0));
+  if (r.mediaVideos) r.mediaVideos.textContent = String(Number(c.videos || 0));
+  if (r.mediaAudios) r.mediaAudios.textContent = String(Number(c.audios || 0));
+  if (r.mediaDocumentos) r.mediaDocumentos.textContent = String(Number(c.documentos || 0));
+  if (r.mediaLinks) r.mediaLinks.textContent = String(Number(c.links || 0));
+}
+
+function resetMediaGalleryState(filter = 'all') {
+  PERFIL_MEDIA_FILTER = String(filter || 'all');
+  PERFIL_MEDIA_ITEMS = [];
+  PERFIL_MEDIA_OFFSET = 0;
+  PERFIL_MEDIA_HAS_MORE = false;
+  PERFIL_MEDIA_TOTAL = 0;
+  PERFIL_MEDIA_LOADING = false;
+  PERFIL_MEDIA_ERROR = '';
+  PERFIL_MEDIA_COUNTS = null;
+}
+
+async function loadMediaPage({ reset = false, filter = null } = {}) {
+  const owner = mediaGalleryOwner();
+
+  if (reset) {
+    resetMediaGalleryState(filter || PERFIL_MEDIA_FILTER || 'all');
+  } else if (filter) {
+    PERFIL_MEDIA_FILTER = String(filter);
+  }
+
+  if (!owner) {
+    PERFIL_MEDIA_ERROR = 'Não foi possível identificar esta conversa.';
+    renderMediaModal();
+    return;
+  }
+
+  if (PERFIL_MEDIA_LOADING) return;
+  if (!reset && !PERFIL_MEDIA_HAS_MORE && PERFIL_MEDIA_ITEMS.length > 0 && !PERFIL_MEDIA_ERROR) return;
+
+  const requestOffset = reset ? 0 : Number(PERFIL_MEDIA_OFFSET || 0);
+  const seq = ++PERFIL_MEDIA_LOAD_SEQ;
+  PERFIL_MEDIA_LOADING = true;
+  PERFIL_MEDIA_ERROR = '';
+  renderMediaModal();
 
   try {
-    const resp = await fetch(
-      `/api/atendimento/clientes/${cid}/profile/media?empresa_id=${EMPRESA_ID}`,
-      {
-        credentials: 'include',
-        cache: 'no-store',
-        headers: { 'Cache-Control': 'no-cache' },
-      }
-    );
+    const qs = new URLSearchParams({
+      empresa_id: String(EMPRESA_ID),
+      categoria: String(PERFIL_MEDIA_FILTER || 'all'),
+      offset: String(requestOffset),
+      limit: String(PERFIL_MEDIA_PAGE_SIZE),
+    });
 
-    if (!resp.ok) throw new Error(`status ${resp.status}`);
+    const instId = getPerfilInstanciaId();
+    if (instId > 0 && owner.kind === 'cliente') {
+      qs.set('instancia_id', String(instId));
+    }
+
+    const resp = await fetch(`${owner.endpoint}?${qs.toString()}`, {
+      credentials: 'include',
+      cache: 'no-store',
+      headers: { 'Cache-Control': 'no-cache' },
+      // O guard global usa 18 s para /profile. A galeria pode consultar histórico
+      // antigo; damos uma janela maior sem deixar a tela travada indefinidamente.
+      zcTimeoutMs: 45000,
+    });
+
+    if (!resp.ok) {
+      let detail = '';
+      try {
+        const err = await resp.json();
+        detail = err?.detail || err?.message || '';
+      } catch {}
+      throw new Error(detail || `Falha ao carregar (${resp.status})`);
+    }
 
     const data = await resp.json();
+    const currentOwner = mediaGalleryOwner();
+    if (seq !== PERFIL_MEDIA_LOAD_SEQ || !currentOwner || currentOwner.key !== owner.key) return;
 
-    if (Array.isArray(data)) {
-      PERFIL_MEDIA_ITEMS = data;
-    } else if (Array.isArray(data?.items)) {
-      PERFIL_MEDIA_ITEMS = data.items;
+    const incoming = Array.isArray(data?.items) ? data.items : [];
+    PERFIL_MEDIA_ITEMS = reset
+      ? mergeUniqueMediaItems([], incoming)
+      : mergeUniqueMediaItems(PERFIL_MEDIA_ITEMS, incoming);
+
+    PERFIL_MEDIA_OFFSET = Number.isFinite(Number(data?.next_offset))
+      ? Number(data.next_offset)
+      : requestOffset + incoming.length;
+    PERFIL_MEDIA_HAS_MORE = !!data?.has_more;
+    PERFIL_MEDIA_TOTAL = Number(data?.total || 0);
+    PERFIL_MEDIA_COUNTS = data?.counts && typeof data.counts === 'object' ? data.counts : null;
+
+    if (PERFIL_MEDIA_COUNTS) {
+      applyMediaCountsToDrawer(PERFIL_MEDIA_COUNTS);
     }
-
-    setPerfilCache('media', 'cliente', cid, PERFIL_MEDIA_ITEMS, PERFIL_MEDIA_CACHE_TTL_MS);
-
-    return PERFIL_MEDIA_ITEMS;
-  } catch {
-    const cached = getPerfilCache('media', 'cliente', cid, { allowStale: true });
-
-    if (cached.hit && Array.isArray(cached.value)) {
-      PERFIL_MEDIA_ITEMS = cached.value;
+  } catch (err) {
+    if (seq !== PERFIL_MEDIA_LOAD_SEQ) return;
+    PERFIL_MEDIA_ERROR = mediaGalleryErrorMessage(err);
+  } finally {
+    if (seq === PERFIL_MEDIA_LOAD_SEQ) {
+      PERFIL_MEDIA_LOADING = false;
+      renderMediaModal();
     }
-
-    return PERFIL_MEDIA_ITEMS;
   }
 }
 
@@ -1117,14 +1258,22 @@ function ensureMediaModal() {
 
     <div class="zcPerfilMediaTabs" id="zcPerfilMediaTabs">
       <button type="button" class="zcPerfilMediaTab is-active" data-filter="all">Tudo</button>
-      <button type="button" class="zcPerfilMediaTab" data-filter="imagem">Imagens</button>
-      <button type="button" class="zcPerfilMediaTab" data-filter="video">Vídeos</button>
+      <button type="button" class="zcPerfilMediaTab" data-filter="visual">Fotos e vídeos</button>
+      <button type="button" class="zcPerfilMediaTab" data-filter="documento">Documentos</button>
+      <button type="button" class="zcPerfilMediaTab" data-filter="link">Links</button>
       <button type="button" class="zcPerfilMediaTab" data-filter="audio">Áudios</button>
-      <button type="button" class="zcPerfilMediaTab" data-filter="documento">Docs</button>
     </div>
 
     <div class="zcPerfilMediaModalBody">
       <div id="zcPerfilMediaModalGrid" class="zcPerfilMediaModalGrid"></div>
+    </div>
+
+    <div class="zcPerfilMediaModalFooter">
+      <div id="zcPerfilMediaModalStatus" class="zcPerfilMediaModalStatus" aria-live="polite"></div>
+      <button type="button" id="zcPerfilMediaLoadMore" class="zcPerfilMediaLoadMore" hidden>
+        <span class="zcPerfilMediaLoadMoreSpinner" aria-hidden="true"></span>
+        <span class="zcPerfilMediaLoadMoreText">Carregar mais</span>
+      </button>
     </div>
   `;
 
@@ -1137,6 +1286,9 @@ function ensureMediaModal() {
     tabs: $('#zcPerfilMediaTabs', modal),
     count: $('#zcPerfilMediaModalCount', modal),
     grid: $('#zcPerfilMediaModalGrid', modal),
+    status: $('#zcPerfilMediaModalStatus', modal),
+    loadMore: $('#zcPerfilMediaLoadMore', modal),
+    loadMoreText: $('.zcPerfilMediaLoadMoreText', modal),
   };
 
   bindMediaModal();
@@ -1168,53 +1320,117 @@ function bindMediaModal() {
     }
   });
 
-  on(m.tabs, 'click', (e) => {
+  on(m.tabs, 'click', async (e) => {
     const btn = e.target.closest('[data-filter]');
     if (!btn) return;
 
-    PERFIL_MEDIA_FILTER = btn.dataset.filter || 'all';
+    const filter = btn.dataset.filter || 'all';
+    if (filter === PERFIL_MEDIA_FILTER && PERFIL_MEDIA_ITEMS.length && !PERFIL_MEDIA_ERROR) return;
 
-    renderMediaModal();
+    await loadMediaPage({ reset: true, filter });
+  });
+
+  on(m.loadMore, 'click', async () => {
+    if (PERFIL_MEDIA_LOADING) return;
+    await loadMediaPage({ reset: false });
   });
 }
 
 function renderMediaModal() {
   const m = ensureMediaModal();
-  const all = Array.isArray(PERFIL_MEDIA_ITEMS) ? PERFIL_MEDIA_ITEMS : [];
-
-  const filtered = PERFIL_MEDIA_FILTER === 'all'
-    ? all
-    : all.filter((item) => mediaCategory(item) === PERFIL_MEDIA_FILTER);
+  const items = Array.isArray(PERFIL_MEDIA_ITEMS) ? PERFIL_MEDIA_ITEMS : [];
 
   if (m.count) {
-    m.count.textContent = `${filtered.length} item(ns)`;
+    if (PERFIL_MEDIA_LOADING && !items.length && !PERFIL_MEDIA_TOTAL) {
+      m.count.textContent = 'Carregando...';
+    } else if (PERFIL_MEDIA_TOTAL > 0) {
+      m.count.textContent = `${items.length} de ${PERFIL_MEDIA_TOTAL} item(ns)`;
+    } else if (PERFIL_MEDIA_HAS_MORE) {
+      m.count.textContent = `${items.length}+ item(ns)`;
+    } else {
+      m.count.textContent = `${items.length} item(ns)`;
+    }
   }
 
   const tabButtons = m.tabs?.querySelectorAll('[data-filter]') || [];
-
   tabButtons.forEach((btn) => {
     btn.classList.toggle('is-active', btn.dataset.filter === PERFIL_MEDIA_FILTER);
+    btn.disabled = false;
   });
 
-  if (!filtered.length) {
-    m.grid.innerHTML = `<div class="zcPerfilMediaModalEmpty">Nenhuma mídia encontrada.</div>`;
-    return;
+  if (!items.length && PERFIL_MEDIA_LOADING) {
+    m.grid.innerHTML = `
+      <div class="zcPerfilMediaModalLoading">
+        <span class="zcPerfilMediaModalSpinner" aria-hidden="true"></span>
+        <span>Carregando ${PERFIL_MEDIA_FILTER === 'link' ? 'links' : 'mídias'}...</span>
+      </div>
+    `;
+  } else if (!items.length && PERFIL_MEDIA_ERROR) {
+    m.grid.innerHTML = `
+      <div class="zcPerfilMediaModalError">
+        <i class="fa-solid fa-circle-exclamation"></i>
+        <strong>Não foi possível carregar</strong>
+        <span>${escapeHtml(PERFIL_MEDIA_ERROR)}</span>
+      </div>
+    `;
+  } else if (!items.length) {
+    m.grid.innerHTML = `<div class="zcPerfilMediaModalEmpty">Nenhum item encontrado.</div>`;
+  } else {
+    m.grid.innerHTML = items.map(renderMediaModalItem).join('');
   }
 
-  m.grid.innerHTML = filtered.map(renderMediaModalItem).join('');
+  if (m.status) {
+    if (PERFIL_MEDIA_LOADING && items.length) {
+      m.status.textContent = 'Carregando mais...';
+    } else if (PERFIL_MEDIA_ERROR) {
+      m.status.textContent = 'A carga foi interrompida. Você pode tentar novamente.';
+    } else if (PERFIL_MEDIA_TOTAL > 0) {
+      m.status.textContent = `Mostrando ${items.length} de ${PERFIL_MEDIA_TOTAL}`;
+    } else if (PERFIL_MEDIA_HAS_MORE) {
+      m.status.textContent = `${items.length} item(ns) carregado(s)`;
+    } else {
+      m.status.textContent = '';
+    }
+  }
+
+  if (m.loadMore) {
+    const retry = !!PERFIL_MEDIA_ERROR;
+    m.loadMore.hidden = !retry && !PERFIL_MEDIA_HAS_MORE;
+    m.loadMore.disabled = PERFIL_MEDIA_LOADING;
+    m.loadMore.classList.toggle('is-loading', PERFIL_MEDIA_LOADING);
+    if (m.loadMoreText) {
+      m.loadMoreText.textContent = PERFIL_MEDIA_LOADING
+        ? 'Carregando...'
+        : (retry ? 'Tentar novamente' : 'Carregar mais');
+    }
+  }
 }
 
 async function openMediaModal(filter = 'all') {
-  ensureMediaModal();
+  const m = ensureMediaModal();
 
-  PERFIL_MEDIA_FILTER = filter || 'all';
+  m.backdrop.classList.add('is-open');
+  m.modal.classList.add('is-open');
 
-  await tryLoadAllMedia();
+  await loadMediaPage({ reset: true, filter: filter || 'all' });
+}
 
-  renderMediaModal();
+function renderMediaPreviewSection() {
+  const r = ensureDrawer();
+  const items = Array.isArray(PERFIL_MEDIA_PREVIEW_ITEMS) ? PERFIL_MEDIA_PREVIEW_ITEMS : [];
+  const preview = previewMediaItems(items);
 
-  mediaModalRefs.backdrop.classList.add('is-open');
-  mediaModalRefs.modal.classList.add('is-open');
+  if (!r.recentMedia) return;
+
+  if (!preview.length) {
+    r.recentMedia.innerHTML = `<div class="zcPerfilMediaPreviewEmpty">Nenhuma mídia para prévia.</div>`;
+  } else {
+    r.recentMedia.innerHTML = preview.map((item, idx) => renderMediaPreviewItem(item, idx)).join('');
+  }
+
+  r.recentMedia.querySelectorAll('[data-open-media]').forEach((btn) => {
+    btn.addEventListener('click', () => openMediaModal('all'));
+  });
 }
 
 /* =========================
@@ -1266,24 +1482,6 @@ function formatPhoneDisplay(j) {
     j?.remote_jid ||
     ''
   );
-}
-
-function renderMediaPreviewSection() {
-  const r = ensureDrawer();
-  const items = Array.isArray(PERFIL_MEDIA_ITEMS) ? PERFIL_MEDIA_ITEMS : [];
-  const preview = previewMediaItems(items);
-
-  if (!r.recentMedia) return;
-
-  if (!preview.length) {
-    r.recentMedia.innerHTML = `<div class="zcPerfilMediaPreviewEmpty">Nenhuma mídia para prévia.</div>`;
-  } else {
-    r.recentMedia.innerHTML = preview.map((item, idx) => renderMediaPreviewItem(item, idx)).join('');
-  }
-
-  r.recentMedia.querySelectorAll('[data-open-media]').forEach((btn) => {
-    btn.addEventListener('click', () => openMediaModal('all'));
-  });
 }
 
 function ensureDrawer() {
@@ -1380,6 +1578,7 @@ function ensureDrawer() {
             <span class="zcPerfilMediaChip">Vídeos: <strong id="pf_media_videos">0</strong></span>
             <span class="zcPerfilMediaChip">Áudios: <strong id="pf_media_audios">0</strong></span>
             <span class="zcPerfilMediaChip">Docs: <strong id="pf_media_documentos">0</strong></span>
+            <span class="zcPerfilMediaChip">Links: <strong id="pf_media_links">0</strong></span>
           </div>
 
           <div class="zcPerfilMediaPreview" id="pf_recent_media">
@@ -1520,6 +1719,7 @@ function ensureDrawer() {
     mediaVideos: $('#pf_media_videos', drawer),
     mediaAudios: $('#pf_media_audios', drawer),
     mediaDocumentos: $('#pf_media_documentos', drawer),
+    mediaLinks: $('#pf_media_links', drawer),
     recentMedia: $('#pf_recent_media', drawer),
     mediaOpen: $('#pf_media_open', drawer),
 
@@ -1610,6 +1810,40 @@ function setPerfilDrawerMode(kind) {
     r.refreshBtn.title = isGroup
       ? 'Atualizar dados do grupo no WhatsApp'
       : 'Atualizar dados do WhatsApp';
+  }
+}
+
+function applyClienteEditPermission(canEdit) {
+  const r = ensureDrawer();
+  const editable = !!canEdit;
+
+  const inputs = [
+    r.nome,
+    r.cpfCnpj,
+    r.rg,
+    r.email,
+    r.dataNasc,
+    r.cep,
+    r.endereco,
+    r.numero,
+    r.complemento,
+    r.bairro,
+    r.cidade,
+  ];
+
+  inputs.forEach((el) => {
+    if (!el) return;
+    el.readOnly = !editable;
+    el.setAttribute('aria-readonly', editable ? 'false' : 'true');
+  });
+
+  [r.genero, r.estado].forEach((el) => {
+    if (el) el.disabled = !editable;
+  });
+
+  if (r.save) {
+    r.save.hidden = !editable;
+    r.save.disabled = !editable;
   }
 }
 
@@ -1802,7 +2036,9 @@ function showAvatarUrl(avatarUrl, displayName, ownerKey) {
 function resetSummary() {
   const r = ensureDrawer();
 
-  PERFIL_MEDIA_ITEMS = [];
+  PERFIL_MEDIA_PREVIEW_ITEMS = [];
+  resetMediaGalleryState('all');
+  PERFIL_MEDIA_LOAD_SEQ += 1;
 
   hardResetAvatar();
 
@@ -1825,6 +2061,7 @@ function resetSummary() {
   if (r.mediaVideos) r.mediaVideos.textContent = '0';
   if (r.mediaAudios) r.mediaAudios.textContent = '0';
   if (r.mediaDocumentos) r.mediaDocumentos.textContent = '0';
+  if (r.mediaLinks) r.mediaLinks.textContent = '0';
 
   if (r.recentMedia) {
     r.recentMedia.innerHTML = `<div class="zcPerfilMediaPreviewEmpty">Nenhuma mídia para prévia.</div>`;
@@ -1885,15 +2122,11 @@ function applyProfileToSummary(j = {}) {
     if (r.businessCard) r.businessCard.hidden = true;
   }
 
-  PERFIL_MEDIA_ITEMS = Array.isArray(j.midias_recentes) ? j.midias_recentes : [];
+  PERFIL_MEDIA_PREVIEW_ITEMS = Array.isArray(j.midias_recentes) ? j.midias_recentes : [];
+  resetMediaGalleryState('all');
 
-  const resumo = j.midias_resumo || calcMediaCounts(PERFIL_MEDIA_ITEMS);
-
-  if (r.mediaTotal) r.mediaTotal.textContent = `${Number(resumo.total || 0)} item(ns)`;
-  if (r.mediaImagens) r.mediaImagens.textContent = String(Number(resumo.imagens || 0));
-  if (r.mediaVideos) r.mediaVideos.textContent = String(Number(resumo.videos || 0));
-  if (r.mediaAudios) r.mediaAudios.textContent = String(Number(resumo.audios || 0));
-  if (r.mediaDocumentos) r.mediaDocumentos.textContent = String(Number(resumo.documentos || 0));
+  const resumo = j.midias_resumo || calcMediaCounts(PERFIL_MEDIA_PREVIEW_ITEMS);
+  applyMediaCountsToDrawer(resumo);
 
   renderMediaPreviewSection();
 }
@@ -1970,6 +2203,14 @@ async function carregarPerfilBanco(explicitId = null, opts = {}) {
     : getClienteId(explicitId);
 
   const bust = opts.bust === true || opts.force === true;
+
+  if (kind === 'cliente') {
+    const perms = await getClientPermissions();
+
+    if (!perms.view) {
+      return null;
+    }
+  }
 
   if (!id || !EMPRESA_ID) {
     toastLocal({
@@ -2072,6 +2313,20 @@ async function carregarPerfilBanco(explicitId = null, opts = {}) {
 
 async function refreshEvolutionProfile(explicitId = null) {
   const kind = PERFIL_KIND_ATUAL === 'grupo' ? 'grupo' : 'cliente';
+
+  if (kind === 'cliente') {
+    const perms = await getClientPermissions({ force: true });
+
+    if (!perms.view) {
+      toastLocal({
+        title: 'Sem permissão',
+        msg: 'Você não tem permissão para visualizar clientes.',
+        type: 'error',
+      });
+      return null;
+    }
+  }
+
   const id = kind === 'grupo'
     ? getGrupoId(explicitId)
     : getClienteId(explicitId);
@@ -2123,10 +2378,6 @@ async function refreshEvolutionProfile(explicitId = null) {
     }
 
     setPerfilCache('profile', kind, id, j, PERFIL_CACHE_TTL_MS);
-
-    if (kind === 'cliente' && Array.isArray(j.midias_recentes)) {
-      setPerfilCache('media', kind, id, j.midias_recentes, PERFIL_MEDIA_CACHE_TTL_MS);
-    }
 
     applyProfile(j, {
       syncForm: false,
@@ -2195,6 +2446,17 @@ async function salvarPerfil() {
       type: 'ok',
     });
 
+    return;
+  }
+
+  const perms = await getClientPermissions({ force: true });
+
+  if (!perms.view || !perms.edit) {
+    toastLocal({
+      title: 'Sem permissão',
+      msg: 'Você não tem permissão para editar clientes.',
+      type: 'error',
+    });
     return;
   }
 
@@ -2305,6 +2567,17 @@ export async function abrirPerfilAtual(opts = {}) {
     return abrirPerfilGrupoAtual(opts);
   }
 
+  const perms = await getClientPermissions({ force: true });
+
+  if (!perms.view) {
+    toastLocal({
+      title: 'Sem permissão',
+      msg: 'Você não tem permissão para visualizar clientes.',
+      type: 'error',
+    });
+    return;
+  }
+
   const explicit =
     opts?.cliente_id ??
     opts?.clienteId ??
@@ -2336,6 +2609,7 @@ export async function abrirPerfilAtual(opts = {}) {
   ensureDrawer();
   ensureMediaModal();
   setPerfilDrawerMode('cliente');
+  applyClienteEditPermission(perms.edit);
   resetForm();
   resetSummary();
   openDrawer();

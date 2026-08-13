@@ -25,9 +25,9 @@ import { getConversationKey, getConversationEntityId, getConversationKind } from
 import '../ui/media-render/core.js';
 import '../ui/media-render/css.js';
 import '../ui/media-render/urls.js';
-import '../ui/media-render/avatars.js';
+import '../ui/media-render/avatars.js?v=20260812-audio-avatar-exclusive-v2';
 import '../ui/media-render/icons.js';
-import '../ui/media-render/audio.js';
+import '../ui/media-render/audio.js?v=20260812-audio-player-v2';
 import '../ui/media-render/fallbacks.js';
 import '../ui/media-render/markers.js';
 import '../ui/media-render/gallery.js';

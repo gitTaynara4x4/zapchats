@@ -9,6 +9,8 @@
 // - Selecionar mensagens
 // - Ações futuras: silenciar, favoritos, bloquear, limpar, apagar etc.
 
+import { getClientPermissions, getCachedClientPermissions } from '../../core/client-permissions.js';
+
 (function () {
   'use strict';
 
@@ -49,6 +51,18 @@
   } = H;
 
   let menuMetaRefreshSerial = 0;
+  let clientPerms = getCachedClientPermissions();
+
+  async function refreshClientPermissions({ force = false } = {}) {
+    clientPerms = await getClientPermissions({ force });
+
+    if (H.state.menuOpen) {
+      renderMenu();
+      positionMenu();
+    }
+
+    return clientPerms;
+  }
 
   function clickExistingButton(selector, fallbackTitle = 'Ação não encontrada') {
     const btn = $(selector);
@@ -419,22 +433,23 @@
       Não trazemos opções "copiadas" do WhatsApp que ainda não têm função real
       ou que poluem a operação do atendente.
     */
-    items.push(
-      {
-        label: 'IA',
-        icon: 'fa-solid fa-wand-magic-sparkles',
-        action() {
-          openIaFromMenu();
-        },
+    items.push({
+      label: 'IA',
+      icon: 'fa-solid fa-wand-magic-sparkles',
+      action() {
+        openIaFromMenu();
       },
-      {
+    });
+
+    if (clientPerms?.view) {
+      items.push({
         label: 'Notas do cliente',
         icon: 'fa-regular fa-note-sticky',
         action() {
           openNotesFromMenu();
         },
-      }
-    );
+      });
+    }
 
     if (canTransferAttendanceFromMenu()) {
       items.push({
@@ -512,14 +527,17 @@
       );
     }
 
-    items.push(
-      {
+    if (clientPerms?.view) {
+      items.push({
         label: 'Dados do contato',
         icon: 'fa-regular fa-circle-user',
         action() {
           openContactData();
         },
-      },
+      });
+    }
+
+    items.push(
       {
         label: 'Pesquisar na conversa',
         icon: 'fa-solid fa-magnifying-glass',
@@ -659,6 +677,8 @@
     menu.hidden = false;
     positionMenu();
 
+    refreshClientPermissions({ force: true }).catch(() => {});
+
     // O menu abre imediatamente com o cache atual e, em seguida, força /meta.
     // Assim ações do chatbot aparecem sem F5 e sem depender do tempo do cache.
     const serial = ++menuMetaRefreshSerial;
@@ -711,4 +731,5 @@
   });
 
   console.log('[header-actions] menu carregado: zc-menu-v12-shared-participants');
+  refreshClientPermissions({ force: true }).catch(() => {});
 })();

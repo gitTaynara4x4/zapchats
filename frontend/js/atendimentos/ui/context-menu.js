@@ -14,6 +14,7 @@ import { markClienteDeletedLocally, removeClienteConversas } from '../state/stor
   if (!EMPRESA_ID) return;
 
   let CAN_DELETE_CONVERSA = false;
+  let CAN_DELETE_CLIENTE = false;
 
   const authFetch = (url, opt = {}) => {
     const f = (window.ZAuth && ZAuth.authFetch) ? ZAuth.authFetch : fetch;
@@ -154,26 +155,34 @@ import { markClienteDeletedLocally, removeClienteConversas } from '../state/stor
       const wrap = document.createElement('div');
       wrap.className = 'zcConfirmBackdrop';
 
+      const permanentHelp = CAN_DELETE_CLIENTE
+        ? '\n• Apagar permanentemente: remove o cliente e TODO o histórico desta conversa do sistema.'
+        : '';
+      const permanentButton = CAN_DELETE_CLIENTE
+        ? '<button class="zcConfirm-btn danger" type="button" data-val="permanente">Apagar permanentemente</button>'
+        : '';
+
       wrap.innerHTML = `
         <div class="zcConfirm" role="dialog" aria-modal="true">
           <div class="zcConfirm-title">Apagar conversa</div>
           <div class="zcConfirm-body">
 O que você deseja fazer com esta conversa?
 
-• Apagar apenas da lista: a conversa some da lista, mas o cliente e o histórico continuam no sistema.
-• Apagar permanentemente: remove o cliente e TODO o histórico desta conversa do sistema.
+• Apagar apenas da lista: a conversa some da lista, mas o cliente e o histórico continuam no sistema.${permanentHelp}
           </div>
           <div class="zcConfirm-footer">
             <button class="zcConfirm-btn ghost" type="button" data-val="cancel">Cancelar</button>
             <button class="zcConfirm-btn" type="button" data-val="lista">Apagar só da lista</button>
-            <button class="zcConfirm-btn danger" type="button" data-val="permanente">Apagar permanentemente</button>
+            ${permanentButton}
           </div>
         </div>
       `;
 
       document.body.appendChild(wrap);
 
-      const [btnCancel, btnLista, btnPerma] = wrap.querySelectorAll('.zcConfirm-btn');
+      const btnCancel = wrap.querySelector('[data-val="cancel"]');
+      const btnLista = wrap.querySelector('[data-val="lista"]');
+      const btnPerma = wrap.querySelector('[data-val="permanente"]');
 
       const close = (val) => {
         window.removeEventListener('keydown', onKey, true);
@@ -192,7 +201,7 @@ O que você deseja fazer com esta conversa?
 
       btnCancel.onclick = () => close(null);
       btnLista.onclick = () => close('lista');
-      btnPerma.onclick = () => close('permanente');
+      if (btnPerma) btnPerma.onclick = () => close('permanente');
 
       wrap.addEventListener('click', (e) => {
         if (e.target === wrap) close(null);
@@ -1033,8 +1042,10 @@ O que você deseja fazer com esta conversa?
         perms.includes('conversas.apagar');
 
       CAN_DELETE_CONVERSA = !!(isAdmin || hasDelPerm);
+      CAN_DELETE_CLIENTE = !!(isAdmin || perms.includes('clientes.excluir'));
     } catch {
       CAN_DELETE_CONVERSA = false;
+      CAN_DELETE_CLIENTE = false;
     }
 
     updateDeleteVisibility();
@@ -1451,6 +1462,15 @@ O que você deseja fazer com esta conversa?
     }
 
     if (choice === 'permanente') {
+      if (!CAN_DELETE_CLIENTE) {
+        notify({
+          title: 'Sem permissão',
+          msg: 'Você não tem permissão para excluir clientes.',
+          type: 'error'
+        });
+        return;
+      }
+
       const ok = await confirmDialog({
         title: 'Apagar permanentemente',
         msg: 'Tem certeza que deseja apagar PERMANENTEMENTE esta conversa?\n\nIsso vai remover o cliente e TODO o histórico desta conversa do sistema. Esta ação não poderá ser desfeita.',
@@ -1469,7 +1489,7 @@ O que você deseja fazer com esta conversa?
         if (res.status === 403) {
           notify({
             title: 'Sem permissão',
-            msg: 'Apenas administradores podem apagar permanentemente.',
+            msg: 'Você precisa das permissões para apagar a conversa e excluir clientes.',
             type: 'error'
           });
           return;

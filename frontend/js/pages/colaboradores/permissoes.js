@@ -538,75 +538,130 @@ function getQuickProfile(profileId){
 }
 
 function createProfileTooltip(profile){
-  const tooltip = createEl('span', 'perm-profile-tooltip');
-  tooltip.id = `perm-profile-tooltip-${profile.id}`;
-  tooltip.setAttribute('role', 'tooltip');
+  return null;
+}
 
-  const title = createEl('span', 'perm-profile-tooltip-title', `${profile.label} poderá:`);
-  const items = createEl('span', 'perm-profile-tooltip-items');
+function getPermissionDataFromInput(input){
+  const item = input?.closest('.perm-item');
+  return {
+    name: item?.querySelector('.perm-item-name')?.textContent?.trim() || item?.dataset.name || String(input?.value || '').trim(),
+    group: item?.closest('.perm-group')?.dataset.group || item?.dataset.group || 'Outros',
+    description: item?.querySelector('.perm-item-desc')?.textContent?.trim() || ''
+  };
+}
 
-  (profile.details || []).forEach(detail => {
-    const item = createEl('span', 'perm-profile-tooltip-item');
-    const check = document.createElement('i');
-    check.className = 'fa-solid fa-check';
-    check.setAttribute('aria-hidden', 'true');
-    item.appendChild(check);
-    item.appendChild(document.createTextNode(detail));
-    items.appendChild(item);
+function getSelectedPermissionRows(){
+  return [...document.querySelectorAll('#e-perms input[name="perm-edit"]:checked')]
+    .map(getPermissionDataFromInput)
+    .filter(item => item.name);
+}
+
+function buildProfilePermissionGroups(list, rows){
+  list.innerHTML = '';
+
+  const grouped = new Map();
+  rows.forEach(row => {
+    const group = row.group || 'Outros';
+    if (!grouped.has(group)) grouped.set(group, []);
+    grouped.get(group).push(row);
   });
 
-  const note = createEl('span', 'perm-profile-tooltip-note', profile.note || '');
+  [...grouped.entries()]
+    .sort(([a], [b]) => {
+      const ia = GROUP_ORDER.indexOf(a);
+      const ib = GROUP_ORDER.indexOf(b);
+      const oa = ia === -1 ? 999 : ia;
+      const ob = ib === -1 ? 999 : ib;
+      return oa - ob || a.localeCompare(b, 'pt-BR');
+    })
+    .forEach(([groupName, items]) => {
+      const section = createEl('section', 'perm-profile-permission-group');
+      const head = createEl('div', 'perm-profile-permission-group-head');
+      const groupTitle = createEl('strong', 'perm-profile-permission-group-title', groupName);
+      const groupCount = createEl('span', 'perm-profile-permission-group-count', `${items.length}`);
+      head.appendChild(groupTitle);
+      head.appendChild(groupCount);
 
-  tooltip.appendChild(title);
-  tooltip.appendChild(items);
-  if (profile.note) tooltip.appendChild(note);
+      const ul = createEl('ul', 'perm-profile-permission-list');
+      items.forEach(row => {
+        const li = createEl('li', 'perm-profile-permission-item');
+        const mark = createEl('span', 'perm-profile-permission-mark');
+        mark.setAttribute('aria-hidden', 'true');
+        const copy = createEl('div', 'perm-profile-permission-copy');
+        const name = createEl('span', 'perm-profile-permission-name', row.name);
+        copy.appendChild(name);
+        if (row.description && normalizeText(row.description) !== normalizeText(row.name)) {
+          const desc = createEl('small', 'perm-profile-permission-desc', row.description);
+          copy.appendChild(desc);
+        }
+        li.appendChild(mark);
+        li.appendChild(copy);
+        ul.appendChild(li);
+      });
 
-  return tooltip;
+      section.appendChild(head);
+      section.appendChild(ul);
+      list.appendChild(section);
+    });
+}
+
+function closeProfileAccordions(exceptProfileId = null){
+  document.querySelectorAll('.perm-profile-entry').forEach(entry => {
+    const profileId = entry.dataset.profile;
+    const open = !!exceptProfileId && profileId === exceptProfileId;
+    entry.classList.toggle('is-open', open);
+    const btn = entry.querySelector('.perm-profile-btn');
+    const details = entry.querySelector('.perm-profile-details');
+    if (btn) btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (details) details.hidden = !open;
+  });
+}
+
+function renderProfileAccordion(profileId, { forceOpen = true } = {}){
+  const profile = getQuickProfile(profileId);
+  const entry = document.querySelector(`.perm-profile-entry[data-profile="${profileId}"]`);
+  if (!profile || !entry) return;
+
+  const details = entry.querySelector('.perm-profile-details');
+  const list = entry.querySelector('.perm-profile-details-groups');
+  const title = entry.querySelector('.perm-profile-details-title');
+  const count = entry.querySelector('.perm-profile-details-count');
+  const note = entry.querySelector('.perm-profile-details-note');
+  const rows = getSelectedPermissionRows();
+
+  if (title) {
+    title.textContent = profile.custom
+      ? 'Permissões selecionadas manualmente'
+      : `Permissões incluídas no perfil ${profile.label}`;
+  }
+  if (count) {
+    count.textContent = `${rows.length} de ${totalCount()} selecionadas`;
+  }
+  if (note) {
+    note.textContent = profile.note || '';
+    note.hidden = !profile.note;
+  }
+  if (list) {
+    if (rows.length) {
+      buildProfilePermissionGroups(list, rows);
+    } else {
+      list.innerHTML = '<div class="perm-profile-details-empty">Nenhuma permissão está selecionada neste perfil.</div>';
+    }
+  }
+
+  if (forceOpen) closeProfileAccordions(profileId);
 }
 
 function updateProfileExplanation(profileId){
-  const panel = document.getElementById('perm-profile-selected');
-  const profile = getQuickProfile(profileId);
+  const legacy = document.getElementById('perm-profile-selected');
+  if (legacy) legacy.hidden = true;
+}
 
-  if (!panel || !profile) {
-    if (panel) panel.hidden = true;
-    return;
-  }
-
-  panel.hidden = false;
-  panel.dataset.profile = profile.id;
-
-  const icon = panel.querySelector('.perm-profile-selected-icon i');
-  const kicker = panel.querySelector('.perm-profile-selected-kicker');
-  const title = panel.querySelector('.perm-profile-selected-title');
-  const description = panel.querySelector('.perm-profile-selected-description');
-  const list = panel.querySelector('.perm-profile-selected-list');
-  const note = panel.querySelector('.perm-profile-selected-note span');
-  const count = panel.querySelector('.perm-profile-selected-count');
-
-  if (icon) icon.className = `fa-solid ${profile.icon}`;
-  if (kicker) kicker.textContent = profile.custom ? 'Ajuste manual ativo' : 'Perfil selecionado';
-  if (title) title.textContent = profile.label;
-  if (description) description.textContent = profile.hint;
-  if (note) note.textContent = profile.note || '';
-  if (count) {
-    count.textContent = profile.custom
-      ? `${selectedCount()} permissões selecionadas`
-      : `${selectedCount()} permissões marcadas automaticamente`;
-  }
-
-  if (list) {
-    list.innerHTML = '';
-    (profile.details || []).forEach(detail => {
-      const li = document.createElement('li');
-      const check = document.createElement('i');
-      check.className = 'fa-solid fa-check';
-      check.setAttribute('aria-hidden', 'true');
-      li.appendChild(check);
-      li.appendChild(document.createTextNode(detail));
-      list.appendChild(li);
-    });
-  }
+function expandGroupsWithSelectedPermissions(){
+  document.querySelectorAll('.perm-group').forEach(group => {
+    const hasSelected = !!group.querySelector('input[name="perm-edit"]:checked');
+    group.classList.toggle('is-collapsed', !hasSelected);
+  });
 }
 
 function groupIconClass(groupName){
@@ -637,9 +692,54 @@ function setAdvancedOpen(open, opts = {}){
   const ePerms = document.getElementById('e-perms');
   const toolbar = document.getElementById('perm-toolbar');
   const actions = document.getElementById('perm-actions-panel');
-  const toggle = document.getElementById('perm-toggle-advanced');
+  const editor = document.getElementById('perm-inline-editor');
+  const editorTitle = document.getElementById('perm-inline-editor-title');
+  const editorHint = document.getElementById('perm-inline-editor-hint');
 
   const isOpen = !!open;
+  let targetProfile = opts.profileId || null;
+
+  if (opts.activateCustom) {
+    document.querySelectorAll('.perm-profile-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.profile === 'custom');
+    });
+    updateProfileExplanation('custom');
+  }
+
+  if (!targetProfile && editor?.parentElement?.classList?.contains('perm-profile-entry')) {
+    targetProfile = editor.parentElement.dataset.profile || null;
+  }
+
+  if (!targetProfile) {
+    targetProfile = document.querySelector('.perm-profile-btn.active')?.dataset.profile || null;
+  }
+
+  if (isOpen && editor && targetProfile) {
+    const entry = document.querySelector(`.perm-profile-entry[data-profile="${targetProfile}"]`);
+    const profile = getQuickProfile(opts.activateCustom ? 'custom' : targetProfile);
+
+    if (entry && editor.parentElement !== entry) {
+      entry.appendChild(editor);
+    }
+
+    editor.hidden = false;
+
+    if (editorTitle) {
+      editorTitle.textContent = profile?.custom
+        ? 'Escolha as permissões manualmente'
+        : `Permissões do perfil ${profile?.label || ''}`.trim();
+    }
+    if (editorHint) {
+      editorHint.textContent = profile?.custom
+        ? 'Marque somente os acessos que este colaborador realmente precisa.'
+        : 'As opções marcadas abaixo fazem parte deste perfil e podem ser ajustadas se necessário.';
+    }
+
+    closeProfileAccordions(targetProfile);
+  } else {
+    if (editor) editor.hidden = true;
+    closeProfileAccordions(null);
+  }
 
   if (ePerms) {
     ePerms.hidden = !isOpen;
@@ -648,147 +748,93 @@ function setAdvancedOpen(open, opts = {}){
 
   if (actions) actions.hidden = !isOpen;
   if (toolbar) toolbar.classList.toggle('advanced-open', isOpen);
-
-  if (toggle) {
-    toggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
-    toggle.innerHTML = isOpen
-      ? '<i class="fa-solid fa-chevron-up" aria-hidden="true"></i><span>Ocultar permissões avançadas</span>'
-      : '<i class="fa-solid fa-sliders" aria-hidden="true"></i><span>Ajustar permissões avançadas</span>';
-  }
-
-  if (opts.activateCustom) {
-    document.querySelectorAll('.perm-profile-btn').forEach(btn => {
-      btn.classList.toggle('active', btn.dataset.profile === 'custom');
-    });
-    updateProfileExplanation('custom');
-  }
 }
 
 function renderToolbar(container){
+  const ePerms = document.getElementById('e-perms');
   const old = document.getElementById('perm-toolbar');
+
+  // O editor real (#e-perms) é movido para dentro do perfil aberto. Antes de
+  // recriar a toolbar, devolvemos o elemento ao <dd> para não removê-lo junto.
+  if (old && ePerms && old.contains(ePerms)) {
+    container.appendChild(ePerms);
+  }
   if (old) old.remove();
 
-  const toolbar = createEl('div', 'perm-toolbar perm-toolbar-profile-first');
+  const toolbar = createEl('div', 'perm-toolbar perm-toolbar-profile-first perm-toolbar-real-editor perm-toolbar-accordion');
   toolbar.id = 'perm-toolbar';
 
   const top = createEl('div', 'perm-toolbar-top');
-
   const titleWrap = createEl('div', 'perm-toolbar-title');
   const title = createEl('strong', '', 'Perfil de acesso');
-  const subtitle = createEl('span', '', 'Passe o mouse para entender cada perfil. Ao clicar, as permissões são marcadas automaticamente.');
-
+  const subtitle = createEl('span', '', 'Selecione um perfil para marcar as permissões automaticamente. Clique nele para ver as opções logo abaixo.');
   titleWrap.appendChild(title);
   titleWrap.appendChild(subtitle);
 
   const summary = createEl('div', 'perm-summary');
   summary.id = 'perm-summary';
   summary.textContent = '0 selecionadas';
-
   top.appendChild(titleWrap);
   top.appendChild(summary);
 
-  const profiles = createEl('div', 'perm-profile-list perm-profile-list-main');
+  const profiles = createEl('div', 'perm-profile-list perm-profile-list-main perm-profile-list-real perm-profile-list-accordion');
 
   QUICK_PROFILES.forEach(profile => {
+    const entry = createEl('div', 'perm-profile-entry');
+    entry.dataset.profile = profile.id;
+
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.className = `perm-profile-btn${profile.custom ? ' perm-profile-custom' : ''}${profile.dangerous ? ' perm-profile-danger' : ''}`;
+    btn.className = `perm-profile-btn perm-profile-row-real${profile.custom ? ' perm-profile-custom' : ''}${profile.dangerous ? ' perm-profile-danger' : ''}`;
     btn.dataset.profile = profile.id;
-    btn.setAttribute('aria-describedby', `perm-profile-tooltip-${profile.id}`);
-    btn.setAttribute('aria-label', `${profile.label}: ${profile.hint}`);
+    btn.setAttribute('aria-label', `${profile.label}: ${profile.description || profile.hint}`);
+    btn.setAttribute('aria-expanded', 'false');
 
-    const icon = document.createElement('i');
-    icon.className = `fa-solid ${profile.icon}`;
-    icon.setAttribute('aria-hidden', 'true');
+    const radio = createEl('span', 'perm-profile-radio-real');
+    radio.setAttribute('aria-hidden', 'true');
 
-    const text = document.createElement('span');
-    text.className = 'perm-profile-copy';
+    const label = createEl('strong', 'perm-profile-row-real-title', profile.label);
+    const desc = createEl('span', 'perm-profile-row-real-desc', profile.description || profile.hint || '');
+    const arrow = createEl('span', 'perm-profile-row-real-arrow');
+    arrow.setAttribute('aria-hidden', 'true');
+    arrow.innerHTML = '<i class="fa-solid fa-chevron-down"></i>';
 
-    const label = document.createElement('strong');
-    label.textContent = profile.label;
-
-    const small = document.createElement('small');
-    small.textContent = profile.description || profile.hint || '';
-
-    const info = createEl('span', 'perm-profile-info');
-    info.setAttribute('aria-hidden', 'true');
-    info.innerHTML = '<i class="fa-regular fa-circle-question"></i>';
-
-    text.appendChild(label);
-    text.appendChild(small);
-
-    btn.appendChild(icon);
-    btn.appendChild(text);
-    btn.appendChild(info);
-    btn.appendChild(createProfileTooltip(profile));
-
-    profiles.appendChild(btn);
+    btn.appendChild(radio);
+    btn.appendChild(label);
+    btn.appendChild(desc);
+    btn.appendChild(arrow);
+    entry.appendChild(btn);
+    profiles.appendChild(entry);
   });
 
-  const selectedProfile = createEl('section', 'perm-profile-selected');
-  selectedProfile.id = 'perm-profile-selected';
-  selectedProfile.hidden = true;
-  selectedProfile.setAttribute('aria-live', 'polite');
+  // Um único editor real é reutilizado e movido para dentro da linha clicada.
+  // Assim não duplicamos inputs nem alteramos o formato salvo no backend.
+  const inlineEditor = createEl('div', 'perm-inline-editor');
+  inlineEditor.id = 'perm-inline-editor';
+  inlineEditor.hidden = true;
 
-  const selectedIcon = createEl('div', 'perm-profile-selected-icon');
-  selectedIcon.innerHTML = '<i class="fa-solid fa-shield-halved" aria-hidden="true"></i>';
+  const editorHead = createEl('div', 'perm-inline-editor-head');
+  const editorCopy = createEl('div', 'perm-inline-editor-copy');
+  const editorTitle = createEl('strong', '', 'Permissões do perfil');
+  editorTitle.id = 'perm-inline-editor-title';
+  const editorHint = createEl('span', '', 'Confira e ajuste as permissões deste perfil.');
+  editorHint.id = 'perm-inline-editor-hint';
+  editorCopy.appendChild(editorTitle);
+  editorCopy.appendChild(editorHint);
+  editorHead.appendChild(editorCopy);
 
-  const selectedBody = createEl('div', 'perm-profile-selected-body');
-  const selectedHead = createEl('div', 'perm-profile-selected-head');
-  const selectedHeadCopy = createEl('div', 'perm-profile-selected-head-copy');
-  const selectedKicker = createEl('span', 'perm-profile-selected-kicker', 'Perfil selecionado');
-  const selectedTitle = createEl('strong', 'perm-profile-selected-title', '');
-  const selectedDescription = createEl('p', 'perm-profile-selected-description', '');
-  const selectedCount = createEl('span', 'perm-profile-selected-count', '');
-
-  selectedHeadCopy.appendChild(selectedKicker);
-  selectedHeadCopy.appendChild(selectedTitle);
-  selectedHead.appendChild(selectedHeadCopy);
-  selectedHead.appendChild(selectedCount);
-
-  const selectedList = createEl('ul', 'perm-profile-selected-list');
-  const selectedNote = createEl('div', 'perm-profile-selected-note');
-  selectedNote.innerHTML = '<i class="fa-solid fa-circle-info" aria-hidden="true"></i><span></span>';
-
-  selectedBody.appendChild(selectedHead);
-  selectedBody.appendChild(selectedDescription);
-  selectedBody.appendChild(selectedList);
-  selectedBody.appendChild(selectedNote);
-
-  selectedProfile.appendChild(selectedIcon);
-  selectedProfile.appendChild(selectedBody);
-
-  const advanced = createEl('div', 'perm-advanced-box');
-
-  const advancedTop = createEl('div', 'perm-advanced-top');
-
-  const advancedCopy = createEl('div', 'perm-advanced-copy');
-  advancedCopy.innerHTML = '<strong>Precisa ajustar algo específico?</strong><span>Abra somente se quiser mexer permissão por permissão.</span>';
-
-  const advancedToggle = document.createElement('button');
-  advancedToggle.type = 'button';
-  advancedToggle.id = 'perm-toggle-advanced';
-  advancedToggle.className = 'btn btn-ghost perm-toggle-advanced';
-  advancedToggle.setAttribute('aria-expanded', 'false');
-  advancedToggle.innerHTML = '<i class="fa-solid fa-sliders" aria-hidden="true"></i><span>Ajustar permissões avançadas</span>';
-
-  advancedTop.appendChild(advancedCopy);
-  advancedTop.appendChild(advancedToggle);
-
-  const actions = createEl('div', 'perm-actions');
+  const actions = createEl('div', 'perm-actions perm-inline-actions');
   actions.id = 'perm-actions-panel';
   actions.hidden = true;
 
   const searchWrap = createEl('label', 'perm-search');
   const searchIcon = document.createElement('i');
   searchIcon.className = 'fa-solid fa-magnifying-glass';
-
   const search = document.createElement('input');
   search.id = 'perm-search-input';
   search.type = 'search';
   search.placeholder = 'Buscar permissão…';
   search.autocomplete = 'off';
-
   searchWrap.appendChild(searchIcon);
   searchWrap.appendChild(search);
 
@@ -808,16 +854,16 @@ function renderToolbar(container){
   actions.appendChild(selectAll);
   actions.appendChild(clearAll);
 
-  advanced.appendChild(advancedTop);
-  advanced.appendChild(actions);
+  inlineEditor.appendChild(editorHead);
+  inlineEditor.appendChild(actions);
+  if (ePerms) inlineEditor.appendChild(ePerms);
 
   toolbar.appendChild(top);
   toolbar.appendChild(profiles);
-  toolbar.appendChild(selectedProfile);
-  toolbar.appendChild(advanced);
-
+  // Fica oculto aqui até o primeiro clique; setAdvancedOpen o move para a
+  // .perm-profile-entry correspondente.
+  toolbar.appendChild(inlineEditor);
   container.insertBefore(toolbar, container.firstChild);
-
   return toolbar;
 }
 
@@ -890,7 +936,12 @@ function setGroupPermissions(groupEl, checked){
 
 function applyQuickProfile(profile){
   if (profile === 'custom') {
-    setAdvancedOpen(true, { activateCustom: true });
+    document.querySelectorAll('.perm-profile-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.profile === 'custom');
+    });
+    setAdvancedOpen(true, { profileId: 'custom' });
+    expandGroupsWithSelectedPermissions();
+    updateSummary();
     return;
   }
 
@@ -916,8 +967,33 @@ function applyQuickProfile(profile){
     btn.classList.toggle('active', btn.dataset.profile === profile);
   });
 
-  setAdvancedOpen(false);
   updateSummary();
+  setAdvancedOpen(true, { profileId: profile });
+  expandGroupsWithSelectedPermissions();
+}
+
+function detectMatchingQuickProfile(){
+  const inputs = [...document.querySelectorAll('#e-perms input[name="perm-edit"]')];
+  if (!inputs.length) return null;
+
+  for (const profile of QUICK_PROFILES.filter(p => !p.custom)) {
+    let matches = true;
+    for (const input of inputs) {
+      const item = input.closest('.perm-item');
+      const fakePermission = {
+        id: input.value,
+        nome: item?.dataset.name || '',
+        descricao: item?.dataset.raw || '',
+        grupo: item?.dataset.group || ''
+      };
+      if (input.checked !== shouldSelectForProfile(profile.id, fakePermission)) {
+        matches = false;
+        break;
+      }
+    }
+    if (matches) return profile.id;
+  }
+  return 'custom';
 }
 
 function filterPermissions(query){
@@ -962,21 +1038,25 @@ function filterPermissions(query){
 function bindToolbarEvents(){
   document.querySelectorAll('.perm-profile-btn').forEach(btn => {
     btn.onclick = () => {
-      applyQuickProfile(btn.dataset.profile);
+      const profileId = btn.dataset.profile;
+      const entry = btn.closest('.perm-profile-entry');
+      const editor = document.getElementById('perm-inline-editor');
+      const isAlreadyOpen = !!entry && !!editor && !editor.hidden && editor.parentElement === entry;
+
+      // Segundo clique no mesmo perfil apenas recolhe as opções. O primeiro
+      // clique (ou a troca de perfil) aplica o perfil e abre logo abaixo dele.
+      if (isAlreadyOpen && btn.classList.contains('active')) {
+        setAdvancedOpen(false);
+        return;
+      }
+
+      applyQuickProfile(profileId);
     };
   });
 
   const selectAll = document.getElementById('perm-select-all');
   const clearAll = document.getElementById('perm-clear-all');
   const search = document.getElementById('perm-search-input');
-  const advancedToggle = document.getElementById('perm-toggle-advanced');
-
-  if (advancedToggle) {
-    advancedToggle.onclick = () => {
-      const isOpen = advancedToggle.getAttribute('aria-expanded') === 'true';
-      setAdvancedOpen(!isOpen, { activateCustom: !isOpen });
-    };
-  }
 
   if (selectAll) {
     selectAll.onclick = () => {
@@ -1028,6 +1108,8 @@ function bindToolbarEvents(){
 
   document.querySelectorAll('#e-perms input[name="perm-edit"]').forEach(input => {
     input.addEventListener('change', () => {
+      // Alterou manualmente: o conjunto passa a ser personalizado, mas o
+      // editor permanece exatamente sob o perfil que a pessoa está ajustando.
       document.querySelectorAll('.perm-profile-btn').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.profile === 'custom');
       });
@@ -1185,6 +1267,13 @@ function renderPermissionGroups(ePerms, rawItems){
 
   bindToolbarEvents();
   setAdvancedOpen(false);
+
+  const detectedProfile = detectMatchingQuickProfile();
+  if (detectedProfile) {
+    document.querySelectorAll('.perm-profile-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.profile === detectedProfile);
+    });
+  }
 }
 
 export async function ensurePermsEdit(){

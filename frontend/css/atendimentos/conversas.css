@@ -1190,6 +1190,30 @@ li.is-pinned{
   opacity:.85;
 }
 
+.inst-loading-state{
+  display:flex;
+  align-items:center;
+  gap:7px;
+  padding:.35rem .5rem;
+  font-size:.85rem;
+  color:var(--text-2);
+  opacity:.82;
+}
+
+.inst-loading-spinner{
+  width:14px;
+  height:14px;
+  flex:0 0 14px;
+  border-radius:999px;
+  border:2px solid color-mix(in oklab,var(--border-2) 82%,transparent);
+  border-top-color:var(--accent);
+  animation:zc-inst-loading-spin .72s linear infinite;
+}
+
+@keyframes zc-inst-loading-spin{
+  to{ transform:rotate(360deg); }
+}
+
 .inst-pill{
   display:inline-flex;
   align-items:center;
@@ -1534,4 +1558,70 @@ html:not(.dark)[data-theme="light"] .wpp-header-filtros-row .wpp-header-filtro[a
 html[data-theme="light"] .wpp-header-filtro:focus-visible,
 html:not(.dark)[data-theme="light"] .wpp-header-filtro:focus-visible{
   box-shadow:0 0 0 2px rgba(17,27,33,.14);
+}
+
+/* =========================
+   PAGINAÇÃO / FEEDBACK VISUAL
+   ========================= */
+#lista-clientes .load-more-item .load-more-btn{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:7px;
+  min-height:28px;
+}
+
+#lista-clientes .load-more-item .load-more-btn[aria-busy="true"]{
+  cursor:wait;
+}
+
+#lista-clientes .load-more-spinner{
+  width:13px;
+  height:13px;
+  flex:0 0 13px;
+  border:2px solid currentColor;
+  border-right-color:transparent;
+  border-radius:50%;
+  animation:zc-load-more-spin .7s linear infinite;
+}
+
+#lista-clientes .load-more-state-icon{
+  width:14px;
+  height:14px;
+  flex:0 0 14px;
+  fill:none;
+  stroke:currentColor;
+  stroke-width:2;
+  stroke-linecap:round;
+  stroke-linejoin:round;
+}
+
+#lista-clientes .load-more-feedback{
+  min-height:34px;
+  padding:6px 0 8px;
+  cursor:default;
+}
+
+#lista-clientes .load-more-feedback-content{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:7px;
+  color:var(--muted, #aebac1);
+  font-size:.8rem;
+  line-height:1.2;
+}
+
+#lista-clientes .load-more-feedback.is-done .load-more-feedback-content{
+  color:var(--muted, #667781);
+}
+
+@keyframes zc-load-more-spin{
+  to{ transform:rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce){
+  #lista-clientes .load-more-spinner{
+    animation-duration:1.5s;
+  }
 }

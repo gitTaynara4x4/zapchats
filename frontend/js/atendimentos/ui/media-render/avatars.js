@@ -119,42 +119,62 @@
     const img = el.querySelector('.wa-avatar img');
     const ph = el.querySelector('.wa-avatar .ph');
 
+    // Segurança: versões antigas do player podiam deixar um badge de microfone
+    // dentro do avatar. Nunca mostramos badge + foto ao mesmo tempo.
+    try {
+      el.querySelectorAll('.wa-avatar .mic').forEach((node) => node.remove());
+    } catch {}
+
     if (!img) return;
 
     const u = String(url || '').trim();
 
+    const showFallback = () => {
+      // O CSS antigo do player usa display !important tanto na foto quanto no
+      // placeholder. Por isso precisamos trocar os estados também com !important.
+      img.style.setProperty('display', 'none', 'important');
+      img.removeAttribute('src');
+      delete img.dataset.cur;
+      el.dataset.avatarState = 'fallback';
+
+      if (ph) {
+        ph.style.setProperty('display', 'grid', 'important');
+      }
+    };
+
+    const showPhoto = () => {
+      img.style.setProperty('display', 'block', 'important');
+      el.dataset.avatarState = 'photo';
+
+      if (ph) {
+        ph.style.setProperty('display', 'none', 'important');
+      }
+    };
+
     if (!u) {
-      img.removeAttribute('src');
-      delete img.dataset.cur;
-
-      if (ph) {
-        ph.style.display = '';
-      }
-
+      showFallback();
       return;
     }
 
-    if (img.dataset.cur === u) {
-      return;
+    // Foto e placeholder são estados exclusivos: nunca aparecem juntos.
+    // Os handlers precisam ser registrados ANTES de definir src, pois imagens
+    // em cache podem concluir o carregamento imediatamente.
+    img.onload = showPhoto;
+    img.onerror = showFallback;
+
+    if (img.dataset.cur !== u || img.getAttribute('src') !== u) {
+      img.dataset.cur = u;
+      img.style.setProperty('display', 'none', 'important');
+      if (ph) ph.style.setProperty('display', 'grid', 'important');
+      img.src = u;
     }
 
-    img.dataset.cur = u;
-    img.src = u;
-
-    img.onload = () => {
-      if (ph) {
-        ph.style.display = 'none';
-      }
-    };
-
-    img.onerror = () => {
-      img.removeAttribute('src');
-      delete img.dataset.cur;
-
-      if (ph) {
-        ph.style.display = '';
-      }
-    };
+    // Cobre também o caso em que a imagem já estava carregada pelo cache antes
+    // de o handler ser associado ou o componente foi reaproveitado no DOM.
+    if (img.complete) {
+      if (Number(img.naturalWidth || 0) > 0) showPhoto();
+      else showFallback();
+    }
   }
 
   function refreshAudioAvatars(root) {

@@ -585,6 +585,21 @@ class Mensagem(Base):
     __table_args__ = (
         Index("ix_mensagens_msg_id", "msg_id"),
         Index("ix_mensagens_empresa_cliente_ts", "empresa_id", "cliente_id", "timestamp"),
+        Index(
+            "ix_mensagens_hist_emp_cli_inst_ts_id",
+            "empresa_id", "cliente_id", "instancia_id", "timestamp", "id",
+            postgresql_where=text("apagada_usuario = false"),
+        ),
+        Index(
+            "ix_mensagens_hist_emp_cli_ts_id",
+            "empresa_id", "cliente_id", "timestamp", "id",
+            postgresql_where=text("apagada_usuario = false"),
+        ),
+        Index(
+            "ix_mensagens_hist_emp_cli_inst_id",
+            "empresa_id", "cliente_id", "instancia_id", "id",
+            postgresql_where=text("apagada_usuario = false"),
+        ),
         Index("ix_mensagens_colaborador_id", "colaborador_id"),
         Index("ix_mensagens_empresa_colab_ts", "empresa_id", "colaborador_id", "timestamp"),
         Index(
@@ -736,6 +751,7 @@ class MensagemGrupo(Base):
         Index("ix_msggrupo_empresa", "empresa_id"),
         Index("ix_msggrupo_author", "author_jid"),
         Index("ix_msggrupo_instancia", "empresa_id", "instancia_id"),
+        Index("ix_msggrupo_hist_emp_grupo_inst_id", "empresa_id", "grupo_id", "instancia_id", "id"),
     )
 
     id = Column(BigInteger, primary_key=True, index=True)
@@ -906,6 +922,11 @@ class FilaAtendimento(Base):
     exigir_aceite = Column(Boolean, nullable=False, server_default="true")
     retorno_ao_liberar = Column(Boolean, nullable=False, server_default="true")
     auto_distribuir = Column(Boolean, nullable=False, server_default="false")
+
+    # Se ativo, quem assumir precisa enviar ao menos uma resposta dentro do
+    # prazo. Caso contrário o atendimento volta automaticamente para a fila.
+    retorno_inatividade_ativo = Column(Boolean, nullable=False, default=False, server_default="false")
+    retorno_inatividade_minutos = Column(Integer, nullable=True)
 
     criada_em = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
     atualizada_em = Column(
@@ -1244,6 +1265,7 @@ class Atendimento(Base):
         Index("ix_atendimentos_empresa_dep_status", "empresa_id", "departamento_id", "status"),
         Index("ix_atendimentos_empresa_fila_status", "empresa_id", "fila_id", "status"),
         Index("ix_atendimentos_empresa_cli_inst", "empresa_id", "cliente_id", "instancia_id"),
+        Index("ix_atendimentos_hist_emp_cli_inst_id", "empresa_id", "cliente_id", "instancia_id", "id"),
         Index("ix_atendimentos_operador", "operador_id"),
         Index("ix_atendimentos_fila", "fila_id"),
         Index(

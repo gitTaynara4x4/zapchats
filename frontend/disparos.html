@@ -28,7 +28,7 @@
   <script src="/frontend/js/page-guard.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" defer></script>
 
-  <link rel="stylesheet" href="/frontend/css/disparos.css?v=20260731-fila-segura-v1"/>
+  <link rel="stylesheet" href="/frontend/css/disparos.css?v=20260813-disparos-pro-v2"/>
   <link rel="stylesheet" href="/frontend/css/dashboard-onboarding.css?v=20260727-onboarding-v2">
 </head>
 <body data-page="disparos">
@@ -87,85 +87,171 @@
       </article>
     </section>
 
-    <section class="connection-strip" aria-label="Status da instância selecionada">
-      <div class="connection-strip__icon"><i class="fa-brands fa-whatsapp"></i></div>
-      <div>
-        <strong id="connectionTitle">Selecione o WhatsApp de envio</strong>
-        <span id="heroInstHelp">Escolha uma instância conectada para liberar a criação da campanha.</span>
-      </div>
-      <span class="connection-chip" id="connectionChip">Aguardando seleção</span>
-    </section>
-
     <section class="campaign-shell" aria-label="Criar campanha">
-      <section class="panel campaign-editor">
-        <header class="panel-head">
-          <div>
-            <span class="panel-eyebrow">Nova campanha</span>
-            <h2>Configurar disparo</h2>
-            <p>Escreva a mensagem, adicione os contatos e defina um intervalo entre os envios.</p>
-          </div>
-          <span class="queue-badge"><i class="fa-solid fa-shield-halved"></i> Fila por WhatsApp</span>
-        </header>
-
-        <div class="field">
-          <div class="field-label-row">
-            <label for="msgDisparo">Mensagem</label>
-            <span id="messageCounter">0 / 4096</span>
-          </div>
-
-          <div class="template-bar">
-            <span>Modelos rápidos</span>
-            <div class="template-chips">
-              <button type="button" class="tpl-chip" data-template="cobranca">Cobrança</button>
-              <button type="button" class="tpl-chip" data-template="pos_venda">Pós-venda</button>
-              <button type="button" class="tpl-chip" data-template="reativacao">Reativação</button>
-              <button type="button" class="tpl-chip" data-template="promocao">Promoção</button>
-              <button type="button" class="tpl-chip" data-template="lembrete">Lembrete</button>
-            </div>
-          </div>
-
-          <textarea id="msgDisparo" class="input input--multiline" rows="6" maxlength="4096" placeholder="Digite a mensagem que será enviada pelo WhatsApp..."></textarea>
-
-          <div class="field-tools">
-            <div class="field-tools__left">
-              <button type="button" id="btnIaMelhorar" class="btn btn-soft btn-sm"><i class="fa-solid fa-wand-magic-sparkles"></i><span>Melhorar com IA</span></button>
-              <button type="button" id="btnPreencherExemplo" class="btn btn-soft btn-sm"><i class="fa-solid fa-bolt"></i><span>Usar exemplo</span></button>
-              <button type="button" id="btnLimparRascunho" class="btn btn-quiet btn-sm"><i class="fa-regular fa-trash-can"></i><span>Limpar</span></button>
-            </div>
-            <label class="check check--inline disabled-option">
-              <input type="checkbox" id="chkIaVariar"><span>Variações por contato <em>em breve</em></span>
-            </label>
-          </div>
-        </div>
-
-        <div class="field">
-          <div class="field-label-row">
-            <label for="numsDisparos">Contatos de destino</label>
-            <span>Brasil: DDD + número</span>
-          </div>
-          <textarea id="numsDisparos" class="input input--multiline numbers-area" rows="8" placeholder="11999999999&#10;11988888888&#10;11977777777"></textarea>
-          <small class="hint">Um número por linha, ou separados por vírgula e ponto e vírgula. O sistema remove o +55 repetido e números duplicados.</small>
-
-          <div class="import-row">
-            <label class="file-label">
-              <i class="fa-solid fa-file-arrow-up"></i><span>Importar TXT, CSV ou XLSX</span>
-              <input type="file" id="fileNumeros" accept=".txt,.csv,.xlsx,text/plain,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden>
-            </label>
-            <button type="button" id="btnAddFromClientes" class="btn btn-soft btn-sm"><i class="fa-solid fa-address-book"></i><span>Selecionar clientes</span></button>
-            <span id="importStatus" class="import-status" aria-live="polite"></span>
-          </div>
-        </div>
-
-        <div class="campaign-options">
-          <label class="check option-card">
-            <input type="checkbox" id="optDedup" checked>
-            <span><strong>Remover duplicados</strong><small>Evita enviar duas vezes para o mesmo número.</small></span>
-          </label>
-
-          <div class="option-card delay-option">
+      <section class="campaign-main-stack">
+        <section class="panel campaign-editor">
+          <header class="campaign-editor__head">
             <div>
+              <span class="panel-eyebrow">Nova campanha</span>
+              <h2>Configurar disparo</h2>
+              <p>Monte a mensagem e a lista de contatos. A revisão fica visível enquanto você configura.</p>
+            </div>
+            <span class="queue-badge"><i class="fa-solid fa-shield-halved"></i> Fila segura</span>
+          </header>
+
+          <section class="builder-section" aria-labelledby="step-message-title">
+            <header class="builder-section__head">
+              <div class="step-index">1</div>
+              <div class="step-copy">
+                <h3 id="step-message-title">Mensagem</h3>
+                <p>Escreva o conteúdo principal ou comece por um modelo pronto.</p>
+              </div>
+              <span class="section-status" id="messageStatusBadge">Aguardando mensagem</span>
+            </header>
+
+            <div class="composer-label-row">
+              <label for="msgDisparo">Texto da mensagem</label>
+              <div class="template-inline">
+                <span>Modelos rápidos</span>
+                <div class="template-chips">
+                  <button type="button" class="tpl-chip" data-template="cobranca">Cobrança</button>
+                  <button type="button" class="tpl-chip" data-template="pos_venda">Pós-venda</button>
+                  <button type="button" class="tpl-chip" data-template="reativacao">Reativação</button>
+                  <button type="button" class="tpl-chip" data-template="promocao">Promoção</button>
+                  <button type="button" class="tpl-chip" data-template="lembrete">Lembrete</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="composer-box">
+              <textarea id="msgDisparo" class="input composer-textarea" rows="7" maxlength="4096" placeholder="Escreva a mensagem que será enviada pelo WhatsApp..."></textarea>
+              <div class="composer-footer">
+                <span class="composer-tip"><i class="fa-regular fa-lightbulb"></i> Escreva como se fosse uma conversa real.</span>
+                <span id="messageCounter">0 / 4096</span>
+              </div>
+            </div>
+
+            <div class="message-actions">
+              <div class="message-actions__buttons">
+                <button type="button" id="btnIaMelhorar" class="action-tile action-tile--accent">
+                  <i class="fa-solid fa-wand-magic-sparkles"></i>
+                  <span><strong>Melhorar com IA</strong><small>Ajustar clareza e naturalidade</small></span>
+                </button>
+                <button type="button" id="btnPreencherExemplo" class="action-tile">
+                  <i class="fa-solid fa-bolt"></i>
+                  <span><strong>Usar exemplo</strong><small>Preencher uma mensagem pronta</small></span>
+                </button>
+                <button type="button" id="btnLimparRascunho" class="action-tile action-tile--quiet">
+                  <i class="fa-regular fa-trash-can"></i>
+                  <span><strong>Limpar</strong><small>Remover conteúdo atual</small></span>
+                </button>
+              </div>
+
+              <label class="ai-toggle-card" for="chkIaVariar">
+                <span class="ai-toggle-card__icon"><i class="fa-solid fa-wand-magic-sparkles"></i></span>
+                <span class="ai-toggle-card__copy">
+                  <strong>Variações com IA</strong>
+                  <small>Cria uma versão natural por contato</small>
+                </span>
+                <span class="switch-control">
+                  <input type="checkbox" id="chkIaVariar">
+                  <span class="switch-control__track" aria-hidden="true"></span>
+                </span>
+              </label>
+            </div>
+          </section>
+
+          <section class="builder-section" aria-labelledby="step-contacts-title">
+            <header class="builder-section__head">
+              <div class="step-index">2</div>
+              <div class="step-copy">
+                <h3 id="step-contacts-title">Contatos de destino</h3>
+                <p>Digite, cole, importe um arquivo ou selecione clientes já cadastrados.</p>
+              </div>
+              <span class="section-status" id="contactsStatusBadge">Nenhum contato</span>
+            </header>
+
+            <div class="contacts-toolbar">
+              <div class="contacts-toolbar__title">
+                <label for="numsDisparos">Lista de contatos</label>
+                <span>Brasil · DDD + número</span>
+              </div>
+              <div class="contacts-toolbar__actions">
+                <button type="button" id="btnPasteContacts" class="btn btn-soft btn-sm"><i class="fa-regular fa-clipboard"></i><span>Colar contatos</span></button>
+                <label class="file-label">
+                  <i class="fa-solid fa-file-arrow-up"></i><span>Importar arquivo</span>
+                  <input type="file" id="fileNumeros" accept=".txt,.csv,.xlsx,text/plain,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden>
+                </label>
+                <button type="button" id="btnAddFromClientes" class="btn btn-soft btn-sm"><i class="fa-solid fa-address-book"></i><span>Selecionar clientes</span></button>
+              </div>
+            </div>
+
+            <div class="contacts-box">
+              <textarea id="numsDisparos" class="input contacts-textarea" rows="8" placeholder="11999999999&#10;11988888888&#10;11977777777"></textarea>
+              <div class="contacts-box__footer">
+                <span><i class="fa-regular fa-circle-check"></i> Um número por linha, vírgula ou ponto e vírgula.</span>
+                <strong id="contactCountLabel">0 contatos válidos</strong>
+              </div>
+            </div>
+
+            <div class="contacts-info-row">
+              <div class="info-strip"><i class="fa-solid fa-shield-halved"></i><span>O sistema normaliza +55 e remove números repetidos automaticamente.</span></div>
+              <span id="importStatus" class="import-status" aria-live="polite"></span>
+            </div>
+            <input type="checkbox" id="optDedup" checked hidden aria-hidden="true">
+          </section>
+        </section>
+      </section>
+
+      <aside class="campaign-side-stack" aria-label="Revisão e configurações">
+        <section class="panel side-card summary-card">
+          <header class="side-card__head">
+            <div><span class="panel-eyebrow">Revisão</span><h2>Resumo da campanha</h2></div>
+            <span class="resume-state" id="resumeState">Aguardando dados</span>
+          </header>
+
+          <div class="summary-list">
+            <div class="summary-row"><span><i class="fa-solid fa-users"></i>Contatos informados</span><strong id="resTotal">0</strong></div>
+            <div class="summary-row"><span><i class="fa-solid fa-circle-check"></i>Contatos válidos</span><strong id="resValidos">0</strong></div>
+            <div class="summary-row"><span><i class="fa-solid fa-triangle-exclamation"></i>Inválidos</span><strong id="resInvalidos">0</strong></div>
+            <div class="summary-row"><span><i class="fa-regular fa-copy"></i>Duplicados encontrados</span><strong id="resDuplicados">0</strong></div>
+          </div>
+
+          <div class="summary-divider"></div>
+
+          <div class="summary-list summary-list--compact">
+            <div class="summary-row"><span><i class="fa-solid fa-clock"></i>Intervalo</span><strong id="resDelay">20s</strong></div>
+            <div class="summary-row"><span><i class="fa-solid fa-wand-magic-sparkles"></i>Variações com IA</span><strong id="resVariacao" class="summary-value-muted">Desativadas</strong></div>
+          </div>
+
+          <div class="estimate-card">
+            <span>Tempo estimado</span>
+            <strong id="resEstimativa">—</strong>
+            <small>Estimativa considerando uma mensagem por contato.</small>
+          </div>
+        </section>
+
+        <section class="panel side-card instance-card">
+          <header class="side-card__head side-card__head--simple"><h2>Instância de envio</h2></header>
+          <div class="instance-display">
+            <span class="instance-display__icon"><i class="fa-brands fa-whatsapp"></i></span>
+            <div class="instance-display__copy">
+              <strong id="connectionTitle">Selecione o WhatsApp de envio</strong>
+              <span id="heroInstHelp">Escolha uma instância conectada para liberar a campanha.</span>
+              <span class="connection-chip" id="connectionChip">Aguardando seleção</span>
+            </div>
+            <button type="button" id="btnAlterarInstancia" class="btn btn-soft btn-sm">Alterar</button>
+          </div>
+          <span id="resInstancia" class="sr-only">Não selecionada</span>
+        </section>
+
+        <section class="panel side-card settings-card">
+          <header class="side-card__head side-card__head--simple"><h2>Configurações de envio</h2></header>
+
+          <div class="setting-block">
+            <div class="setting-block__copy">
               <strong>Intervalo entre envios</strong>
-              <small>A fila respeita esse tempo também entre campanhas da mesma instância.</small>
+              <small>Tempo aguardado antes de processar o próximo contato.</small>
             </div>
             <div class="delay-control">
               <span class="delay-badge" id="delayRiskBadge">Seguro</span>
@@ -180,49 +266,26 @@
               </select>
             </div>
           </div>
-        </div>
 
-        <details class="help-details">
-          <summary><i class="fa-regular fa-circle-question"></i> Como funciona a fila segura?</summary>
-          <div class="help-box">
-            Cada WhatsApp processa uma mensagem por vez. Se existirem duas campanhas usando a mesma instância, a segunda aguarda a primeira terminar. A fila é retomada automaticamente após reinício do servidor.
+          <div class="setting-note"><i class="fa-regular fa-circle-info"></i><span>A fila respeita o intervalo também entre campanhas que usam o mesmo WhatsApp.</span></div>
+
+          <details class="help-details">
+            <summary><i class="fa-regular fa-circle-question"></i> Como funciona a fila segura?</summary>
+            <div class="help-box">Cada WhatsApp processa uma mensagem por vez. Se houver duas campanhas na mesma instância, a próxima aguarda. A fila continua salva mesmo após reinício do servidor.</div>
+          </details>
+        </section>
+
+        <section class="panel side-card launch-card">
+          <div class="launch-card__status">
+            <i class="fa-solid fa-circle-info"></i>
+            <p id="summaryAdvice">Selecione uma instância, escreva a mensagem e adicione pelo menos um contato válido.</p>
           </div>
-        </details>
-      </section>
-
-      <aside class="panel campaign-review">
-        <header class="review-head">
-          <div><span class="panel-eyebrow">Revisão</span><h2>Resumo da campanha</h2></div>
-          <span class="resume-state" id="resumeState">Aguardando dados</span>
-        </header>
-
-        <div class="review-instance">
-          <span>WhatsApp selecionado</span>
-          <strong id="resInstancia">Não selecionada</strong>
-        </div>
-
-        <div class="review-stats">
-          <div><span>Informados</span><strong id="resTotal">0</strong></div>
-          <div><span>Válidos</span><strong id="resValidos">0</strong></div>
-          <div><span>Inválidos</span><strong id="resInvalidos">0</strong></div>
-          <div><span>Intervalo</span><strong id="resDelay">20s</strong></div>
-        </div>
-
-        <div class="estimate-card">
-          <span>Tempo estimado</span>
-          <strong id="resEstimativa">—</strong>
-          <small>Considerando uma mensagem por contato.</small>
-        </div>
-
-        <div class="summary-note-box">
-          <i class="fa-solid fa-circle-info"></i>
-          <p id="summaryAdvice">Selecione uma instância, escreva a mensagem e adicione pelo menos um contato válido.</p>
-        </div>
-
-        <button id="btnDisparar" class="btn btn-primary btn-lg" type="button">
-          <i class="fa-solid fa-paper-plane"></i><span>Iniciar campanha</span>
-        </button>
-        <div id="statusDisparos" class="status-line" aria-live="polite"></div>
+          <button id="btnDisparar" class="btn btn-primary launch-button" type="button">
+            <span class="launch-button__icon"><i class="fa-solid fa-paper-plane"></i></span>
+            <span><strong>Iniciar campanha</strong><small>Revisar e adicionar à fila de envio</small></span>
+          </button>
+          <div id="statusDisparos" class="status-line" aria-live="polite"></div>
+        </section>
       </aside>
     </section>
 
@@ -315,7 +378,7 @@
 
   <div id="toast" role="status" aria-live="polite"></div>
 
-  <script src="/frontend/js/pages/disparos.js?v=20260731-fila-segura-v1" defer></script>
+  <script src="/frontend/js/pages/disparos.js?v=20260813-disparos-pro-v2" defer></script>
   <script src="/frontend/js/help/help-disparador.js?v=20260708-disparador-tour-responsive-final" defer></script>
   <script src="/frontend/js/pages/dashboard-onboarding.js?v=20260727-onboarding-v2" defer></script>
 </body>

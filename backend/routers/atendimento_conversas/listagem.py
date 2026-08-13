@@ -346,6 +346,16 @@ def listar_conversas(
         if row_cur:
             cursor_id = int(row_cur.id)
             cursor_ts = row_cur.timestamp
+        else:
+            # Cursor antigo/inválido não pode fazer a API voltar para a
+            # primeira página. Esse era um dos motivos de o front receber as
+            # mesmas conversas ao clicar em "Carregar mais".
+            return {
+                "items": [],
+                "next_cursor": None,
+                "has_more": False,
+                "cursor_invalid": True,
+            }
 
     q_clientes = _query_clientes_ultima_por_conversa(
         db,
@@ -379,7 +389,13 @@ def listar_conversas(
             pass
 
     base_limit = limit
-    limit_db = base_limit * 2 if cursor_last_msg_id is None else base_limit
+
+    # Busca uma pequena folga. A página final continua limitada a
+    # `base_limit`, mas a folga evita que fixados consumam a janela da
+    # primeira página. A existência da próxima página é confirmada depois
+    # usando o último item realmente entregue.
+    pinned_buffer = len(pinned_ids) if cursor_last_msg_id is None else 0
+    limit_db = max(base_limit + pinned_buffer + 1, base_limit + 1)
 
     rows_clientes_base = (
         q_clientes.order_by(M.timestamp.desc(), M.id.desc())
@@ -563,13 +579,14 @@ def listar_conversas(
     entries_pinned.sort(key=_sort_key, reverse=True)
     entries_normal.sort(key=_sort_key, reverse=True)
 
+    normal_page = entries_normal[:base_limit]
+
     if cursor_last_msg_id is None:
-        entries = entries_pinned + entries_normal[:base_limit]
+        entries = entries_pinned + normal_page
     else:
-        entries = entries_normal[:base_limit]
+        entries = normal_page
 
     items: List[Dict[str, Any]] = []
-    cliente_msg_ids_visiveis_normais: List[int] = []
 
     for ts_dt, msg_id, payload, is_cli in entries:
         ts_iso = _iso(ts_dt)
@@ -579,9 +596,6 @@ def listar_conversas(
 
         items.append(payload)
 
-        if is_cli and msg_id and not bool(payload.get("pinned")):
-            cliente_msg_ids_visiveis_normais.append(int(msg_id))
-
     _attach_participacao_em_payloads(
         db,
         empresa_id=int(empresa_id),
@@ -589,9 +603,49 @@ def listar_conversas(
         current_colab_id=current_colab_id,
     )
 
-    next_cursor = min(cliente_msg_ids_visiveis_normais) if cliente_msg_ids_visiveis_normais else None
+    # O cursor precisa apontar para o ÚLTIMO item da ordenação real
+    # (timestamp DESC, id DESC), e não para o menor id da página.
+    # Menor id != item mais antigo quando mensagens chegam fora de ordem.
+    # Isso fazia páginas se sobreporem/repetirem e o botão parecer parado.
+    next_cursor = None
+    has_more = False
+
+    # Grupos usam MensagemGrupo.id e não podem virar cursor de Mensagem.id.
+    # Na primeira página eles são misturados visualmente com clientes, então o
+    # cursor deve usar o último CLIENTE realmente exibido.
+    client_page_entries = [entry for entry in normal_page if bool(entry[3])]
+
+    if client_page_entries:
+        last_ts, last_msg_id, _last_payload, _last_is_cli = client_page_entries[-1]
+
+        if last_ts is not None and last_msg_id:
+            q_more = q_clientes
+
+            # Na primeira página os fixados são exibidos separadamente e não
+            # podem contar como próxima página normal.
+            if cursor_last_msg_id is None and pinned_ids:
+                try:
+                    q_more = q_more.filter(~M.cliente_id.in_([int(x) for x in pinned_ids]))
+                except Exception:
+                    pass
+
+            q_more = q_more.filter(
+                (M.timestamp < last_ts)
+                | ((M.timestamp == last_ts) & (M.id < int(last_msg_id)))
+            )
+
+            has_more = (
+                q_more.order_by(M.timestamp.desc(), M.id.desc())
+                .limit(1)
+                .first()
+                is not None
+            )
+
+            if has_more:
+                next_cursor = int(last_msg_id)
 
     return {
         "items": items,
         "next_cursor": next_cursor,
+        "has_more": bool(has_more),
     }

@@ -17,6 +17,35 @@
   const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
   const EMPRESA_ID = Number(window.EMPRESA_ID || localStorage.getItem("empresa_id") || 0);
 
+  async function canViewClients() {
+    try {
+      const auth = window.ZAuth || window.Auth;
+      if (auth && typeof auth.ensurePerm === "function") {
+        return !!(await auth.ensurePerm("clientes.ver", { autoHandle: false }));
+      }
+
+      const r = await fetch("/api/permissoes/minhas", {
+        credentials: "include",
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+      });
+      if (!r.ok) return false;
+      const list = await r.json().catch(() => []);
+      return Array.isArray(list) && list.includes("clientes.ver");
+    } catch {
+      return false;
+    }
+  }
+
+  async function refreshAgendaPermissionUI() {
+    const allowed = await canViewClients();
+    document.querySelectorAll("#btn-contatos,[data-role='btn-agenda']").forEach((btn) => {
+      btn.hidden = !allowed;
+      btn.setAttribute("aria-hidden", allowed ? "false" : "true");
+    });
+    return allowed;
+  }
+
   function debounce(fn, ms = 250) {
     let t;
     return (...a) => {
@@ -178,6 +207,42 @@
         `
       )
       .join("");
+  }
+
+  function getAgendaLoadingHtml(label = "Carregando clientes...", skeletonCount = 0, extraClass = "") {
+    const safeLabel = escHtml(label);
+    const skeletons = skeletonCount > 0 ? getSkeletonHtml(skeletonCount) : "";
+
+    return `
+      <div class="ag-loading-state ${extraClass}" role="status" aria-live="polite">
+        <span class="ag-loading-spinner" aria-hidden="true"></span>
+        <span>${safeLabel}</span>
+      </div>
+      ${skeletons}
+    `;
+  }
+
+  function showAgendaLoading(label, { append = false, skeletonCount = 0 } = {}) {
+    const list = $("#agList");
+    if (!list) return;
+
+    list.querySelectorAll(".ag-loading-state--more").forEach((el) => el.remove());
+
+    if (append) {
+      list.insertAdjacentHTML(
+        "beforeend",
+        getAgendaLoadingHtml(label || "Carregando mais clientes...", 0, "ag-loading-state--more")
+      );
+      return;
+    }
+
+    list.innerHTML = getAgendaLoadingHtml(label || "Carregando clientes...", skeletonCount);
+  }
+
+  function clearAgendaMoreLoading() {
+    const list = $("#agList");
+    if (!list) return;
+    list.querySelectorAll(".ag-loading-state--more").forEach((el) => el.remove());
   }
 
   function avatarHtml(url) {
@@ -778,11 +843,14 @@
       debounce(async () => {
         const nearBottom = list.scrollTop + list.clientHeight >= list.scrollHeight - 140;
         if (nearBottom && dataState.hasMore && !dataState.loading) {
+          showAgendaLoading("Carregando mais clientes...", { append: true });
+
           try {
             await fetchNextPage({ initial: false });
             renderList();
           } catch (e) {
             console.error("[Agenda] autoload paginação", e);
+            clearAgendaMoreLoading();
           }
         }
       }, 80),
@@ -792,6 +860,11 @@
 
   /* ---------------- Fluxos ---------------- */
   async function abrirAgenda() {
+    if (!(await canViewClients())) {
+      toast.err('Você não tem permissão para visualizar clientes.');
+      return;
+    }
+
     const instRaw = getInstanciaAtiva();
 
     if (!instRaw || String(instRaw).trim() === "") {
@@ -804,7 +877,7 @@
     window.__Agenda.open();
 
     const list = $("#agList");
-    if (list) list.innerHTML = getSkeletonHtml(8);
+    showAgendaLoading("Carregando clientes...", { skeletonCount: 6 });
 
     dataState.mode = "feed";
     dataState.q = "";
@@ -831,7 +904,7 @@
     if (q.length === 0) {
       dataState.mode = "feed";
       dataState.q = "";
-      if (list) list.innerHTML = getSkeletonHtml(4);
+      showAgendaLoading("Carregando clientes...", { skeletonCount: 4 });
 
       try {
         await fetchNextPage({ initial: true });
@@ -852,7 +925,7 @@
     dataState.mode = "search";
     dataState.q = q;
 
-    if (list) list.innerHTML = getSkeletonHtml(4);
+    showAgendaLoading("Buscando clientes...", { skeletonCount: 4 });
 
     try {
       await fetchNextPage({ initial: true });
@@ -885,6 +958,9 @@
     },
     { passive: false }
   );
+
+  refreshAgendaPermissionUI().catch(() => {});
+  window.addEventListener("auth:change", () => refreshAgendaPermissionUI().catch(() => {}));
 
   /* ================== AGENDA: Lazy avatar (BD -> Evolution -> BD) ================== */
   (function agendaAvatarHydrator() {

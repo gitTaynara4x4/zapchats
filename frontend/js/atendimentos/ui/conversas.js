@@ -11,7 +11,8 @@
 
   function getTheme() {
     try {
-      return localStorage.getItem('zc:theme') ||
+      return localStorage.getItem('zapschat_theme') ||
+             localStorage.getItem('zc:theme') ||
              localStorage.getItem('theme') ||
              localStorage.getItem('valora_theme') ||
              'dark';
@@ -28,6 +29,7 @@
     root.setAttribute('data-theme', dark ? 'dark' : 'light');
 
     try {
+      localStorage.setItem('zapschat_theme', dark ? 'dark' : 'light');
       localStorage.setItem('zc:theme', dark ? 'dark' : 'light');
       localStorage.setItem('theme', dark ? 'dark' : 'light');
       localStorage.setItem('valora_theme', dark ? 'dark' : 'light');

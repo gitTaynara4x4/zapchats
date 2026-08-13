@@ -487,6 +487,11 @@ def aceitar_conversa(
     if atd is None:
         raise HTTPException(status_code=404, detail="Atendimento não encontrado")
 
+    # O prazo de retorno da fila começa quando alguém assume a conversa.
+    # Não reinicia ao entrar apenas como participante.
+    if became_responsavel and getattr(atd, "fila_id", None) is not None and hasattr(atd, "aceito_em"):
+        atd.aceito_em = datetime.now(timezone.utc)
+
     db.add(atd)
 
     evento_sistema = None
@@ -548,6 +553,8 @@ def aceitar_conversa(
         "fila_ativa": part_info.get("fila_ativa", False),
         "fila_exigir_aceite": part_info.get("fila_exigir_aceite", False),
         "fila_escolhida_em": part_info.get("fila_escolhida_em"),
+        "retorno_inatividade_ativo": part_info.get("retorno_inatividade_ativo", False),
+        "retorno_inatividade_minutos": part_info.get("retorno_inatividade_minutos"),
         "exigir_aceite": part_info.get("exigir_aceite", False),
         "aceite_obrigatorio": part_info.get("aceite_obrigatorio", False),
         "aguardando_aceite": part_info.get("aguardando_aceite", False),
@@ -810,6 +817,8 @@ def liberar_conversa(
         "fila_ativa": part_info.get("fila_ativa", False),
         "fila_exigir_aceite": part_info.get("fila_exigir_aceite", False),
         "fila_escolhida_em": part_info.get("fila_escolhida_em"),
+        "retorno_inatividade_ativo": part_info.get("retorno_inatividade_ativo", False),
+        "retorno_inatividade_minutos": part_info.get("retorno_inatividade_minutos"),
         "exigir_aceite": part_info.get("exigir_aceite", False),
         "aceite_obrigatorio": part_info.get("aceite_obrigatorio", False),
         "aguardando_aceite": part_info.get("aguardando_aceite", False),
@@ -1009,6 +1018,11 @@ def transferir_colaborador(
     if atd is None:
         raise HTTPException(status_code=404, detail="Atendimento não encontrado")
 
+    # Ao transferir uma conversa de fila, o novo responsável recebe o prazo
+    # completo para enviar a primeira resposta.
+    if getattr(atd, "fila_id", None) is not None and hasattr(atd, "aceito_em"):
+        atd.aceito_em = datetime.now(timezone.utc)
+
     db.add(atd)
     db.commit()
     db.refresh(atd)
@@ -1047,6 +1061,8 @@ def transferir_colaborador(
         "fila_ativa": part_info.get("fila_ativa", False),
         "fila_exigir_aceite": part_info.get("fila_exigir_aceite", False),
         "fila_escolhida_em": part_info.get("fila_escolhida_em"),
+        "retorno_inatividade_ativo": part_info.get("retorno_inatividade_ativo", False),
+        "retorno_inatividade_minutos": part_info.get("retorno_inatividade_minutos"),
         "exigir_aceite": part_info.get("exigir_aceite", False),
         "aceite_obrigatorio": part_info.get("aceite_obrigatorio", False),
         "aguardando_aceite": part_info.get("aguardando_aceite", False),

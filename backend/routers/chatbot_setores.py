@@ -33,6 +33,9 @@ from backend.services.atendimento_claim_state import (
 from backend.services.chatbot_claim_policy import (
     customer_has_department_triage_marker,
 )
+from backend.services.fila_atendimento_runtime import (
+    attach_queue_for_department_if_configured,
+)
 
 router = APIRouter(prefix="/api", tags=["Chatbot (Triagem Setores)"])
 
@@ -1304,6 +1307,37 @@ def _ensure_waiting_atendimento_for_triage(
         return None
 
 
+def _attach_queue_to_triage_atendimento(
+    db: Session,
+    *,
+    atendimento: Any,
+    empresa_id: int,
+    instancia_id: int,
+    departamento_id: int,
+    now: datetime,
+):
+    """Vincula a fila operacional do departamento somente se ela estiver configurada."""
+    if atendimento is None:
+        return None
+    try:
+        return attach_queue_for_department_if_configured(
+            db,
+            atendimento=atendimento,
+            empresa_id=int(empresa_id),
+            instancia_id=int(instancia_id),
+            departamento_id=int(departamento_id),
+            now=now,
+        )
+    except Exception as exc:
+        # A fila nunca pode derrubar a triagem principal. Se a configuração de
+        # fila estiver inconsistente, o atendimento continua pelo departamento.
+        try:
+            print("[CHATBOT][fila][skip]", repr(exc))
+        except Exception:
+            pass
+        return None
+
+
 def _commit_cliente_departamento_triagem(
     db: Session,
     *,
@@ -1681,8 +1715,17 @@ def triagem_handle_inbound(
         )
 
         atendimento_id = None
+        fila_aplicada = None
         if atendimento is not None:
             try:
+                fila_aplicada = _attach_queue_to_triage_atendimento(
+                    db,
+                    atendimento=atendimento,
+                    empresa_id=empresa_id,
+                    instancia_id=instancia_id,
+                    departamento_id=int(dep_id),
+                    now=now,
+                )
                 atendimento_id = int(getattr(atendimento, "id", 0) or 0) or None
                 db.commit()
             except Exception as exc:
@@ -1710,6 +1753,14 @@ def triagem_handle_inbound(
             )
             if atendimento is not None:
                 try:
+                    fila_aplicada = _attach_queue_to_triage_atendimento(
+                        db,
+                        atendimento=atendimento,
+                        empresa_id=empresa_id,
+                        instancia_id=instancia_id,
+                        departamento_id=int(dep_id),
+                        now=now,
+                    )
                     atendimento_id = int(getattr(atendimento, "id", 0) or 0) or None
                     db.commit()
                 except Exception as exc:
@@ -1740,7 +1791,8 @@ def triagem_handle_inbound(
             except Exception:
                 pass
 
-        ack = _build_assign_ack(empresa_nome=empresa_nome, dep=dep_obj)
+        fila_msg = str(getattr(fila_aplicada, "mensagem_padrao", None) or "").strip()
+        ack = fila_msg or _build_assign_ack(empresa_nome=empresa_nome, dep=dep_obj)
         _send_and_persist_triage_message(
             db,
             empresa_id=empresa_id,
@@ -1762,6 +1814,8 @@ def triagem_handle_inbound(
             "operador_id": None,
             "atendimento_id": atendimento_id,
             "atendimento_persistido": bool(atendimento_id),
+            "fila_id": int(getattr(fila_aplicada, "id", 0) or 0) or None,
+            "fila_nome": getattr(fila_aplicada, "nome", None) if fila_aplicada is not None else None,
         }
 
     tentativas_antes = int(cliente.triagem_tentativas or 0)
@@ -1831,8 +1885,17 @@ def triagem_handle_inbound(
         )
 
         atendimento_id = None
+        fila_aplicada = None
         if atendimento is not None:
             try:
+                fila_aplicada = _attach_queue_to_triage_atendimento(
+                    db,
+                    atendimento=atendimento,
+                    empresa_id=empresa_id,
+                    instancia_id=instancia_id,
+                    departamento_id=fallback_dep_id,
+                    now=now,
+                )
                 atendimento_id = int(getattr(atendimento, "id", 0) or 0) or None
                 db.commit()
             except Exception as exc:
@@ -1858,6 +1921,14 @@ def triagem_handle_inbound(
             )
             if atendimento is not None:
                 try:
+                    fila_aplicada = _attach_queue_to_triage_atendimento(
+                        db,
+                        atendimento=atendimento,
+                        empresa_id=empresa_id,
+                        instancia_id=instancia_id,
+                        departamento_id=fallback_dep_id,
+                        now=now,
+                    )
                     atendimento_id = int(getattr(atendimento, "id", 0) or 0) or None
                     db.commit()
                 except Exception as exc:
@@ -1873,7 +1944,8 @@ def triagem_handle_inbound(
 
         _schedule_reload_clientes(int(empresa_id))
 
-        fallback_msg = _build_fallback_message(empresa_nome=empresa_nome, cfg=cfg)
+        fila_msg = str(getattr(fila_aplicada, "mensagem_padrao", None) or "").strip()
+        fallback_msg = fila_msg or _build_fallback_message(empresa_nome=empresa_nome, cfg=cfg)
         _send_and_persist_triage_message(
             db,
             empresa_id=empresa_id,
@@ -1896,6 +1968,8 @@ def triagem_handle_inbound(
             "operador_id": None,
             "atendimento_id": atendimento_id,
             "atendimento_persistido": bool(atendimento_id),
+            "fila_id": int(getattr(fila_aplicada, "id", 0) or 0) or None,
+            "fila_nome": getattr(fila_aplicada, "nome", None) if fila_aplicada is not None else None,
         }
 
     if tentativas_antes == 0:

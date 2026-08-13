@@ -77,6 +77,9 @@ from backend.migrations.colaborador_last_access import ensure_colaborador_last_a
 from backend.migrations.colaborador_conversation_visibility import ensure_colaborador_conversation_visibility
 from backend.migrations.clientes_sequence import ensure_clientes_id_sequence
 from backend.migrations.user_onboarding import ensure_user_onboarding
+from backend.migrations.fila_retorno_inatividade import ensure_fila_retorno_inatividade
+from backend.migrations.atendimento_historico_performance import ensure_atendimento_historico_performance
+from backend.services.fila_atendimento_runtime import start_fila_timeout_worker, stop_fila_timeout_worker
 
 # Integrações Evolution
 from backend.integrations.evolution.api.remove_instance import router as remove_instance_router
@@ -1324,7 +1327,21 @@ def partial(path: str):
     if not target.is_file():
         raise HTTPException(status_code=404)
 
-    return _html_response_from_file(target, inject_build_script=False)
+    # Somente arquivos HTML devem passar pelo rewriter de partials.
+    # CSS/JS dentro de /frontend/partials precisam manter o MIME real;
+    # caso contrário o navegador recebe text/html e ignora o stylesheet/script.
+    if target.suffix.lower() == ".html":
+        return _html_response_from_file(target, inject_build_script=False)
+
+    return FileResponse(
+        path=str(target),
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+            "X-ZC-Build": str(BUILD_ID),
+        },
+    )
 
 
 # =======================================
@@ -1548,6 +1565,8 @@ async def _start_integrations():
             ensure_colaborador_conversation_visibility(engine, LOG)
             ensure_clientes_id_sequence(engine, LOG)
             ensure_user_onboarding(engine, LOG)
+            ensure_fila_retorno_inatividade(engine, LOG)
+            ensure_atendimento_historico_performance(engine, LOG)
             db_ok = True
             LOG("[STARTUP] DB ok e tabelas garantidas.")
             break
@@ -1568,12 +1587,19 @@ async def _start_integrations():
     app.state.evo_task = None
     app.state.evo_stop = None
     app.state.disparos_task = None
+    app.state.fila_timeout_task = None
 
     try:
         app.state.disparos_task = await start_disparos_dispatcher()
         LOG("[STARTUP] Fila persistente de disparos ligada.")
     except Exception as e:
         LOG(f"[STARTUP][Disparos] falha ao iniciar dispatcher: {e}")
+
+    try:
+        app.state.fila_timeout_task = await start_fila_timeout_worker()
+        LOG("[STARTUP] Retorno automático das filas ligado.")
+    except Exception as e:
+        LOG(f"[STARTUP][Filas] falha ao iniciar retorno automático: {e}")
 
     if USE_RABBIT:
         try:
@@ -1663,6 +1689,16 @@ async def _stop_integrations():
 
     disparos_task = getattr(app.state, "disparos_task", None)
     await _stop_named_task(disparos_task, name="Disparos", timeout=3.0)
+
+    try:
+        await stop_fila_timeout_worker()
+    except asyncio.CancelledError:
+        pass
+    except Exception as e:
+        LOG(f"[SHUTDOWN][Filas] erro no stop: {e}")
+
+    fila_timeout_task = getattr(app.state, "fila_timeout_task", None)
+    await _stop_named_task(fila_timeout_task, name="FilaTimeout", timeout=3.0)
 
     stop = getattr(app.state, "rabbit_stop", None)
     if stop:

@@ -8,6 +8,7 @@
 import { EMPRESA_ID } from '../core/env.js';
 import { numeroE164 } from '../core/format.js';
 import { state } from '../state/store.js';
+import { getClientPermissions, getCachedClientPermissions } from '../core/client-permissions.js';
 
 (function () {
   const $ = (s, root) => (root || document).querySelector(s);
@@ -115,12 +116,30 @@ import { state } from '../state/store.js';
     return bad.includes(v.toLowerCase()) ? '' : v;
   }
 
-  function reflectPlusBtnState(btn) {
-    const ok = hasSelectedInstance();
+  function reflectPlusBtnState(btn, perms = getCachedClientPermissions()) {
+    const instanceOk = hasSelectedInstance();
+    const permissionOk = Boolean(perms?.view || perms?.create);
+    const ok = instanceOk && permissionOk;
 
     btn.disabled = !ok;
-    btn.title = ok ? 'Nova conversa' : 'Selecione o WhatsApp para enviar';
+
+    if (!instanceOk) {
+      btn.title = 'Selecione o WhatsApp para enviar';
+    } else if (!perms?.loaded) {
+      btn.title = 'Verificando permissões de clientes';
+    } else if (!permissionOk) {
+      btn.title = 'Sem permissão para consultar ou criar clientes';
+    } else {
+      btn.title = 'Nova conversa';
+    }
+
     btn.setAttribute('aria-disabled', ok ? 'false' : 'true');
+  }
+
+  async function refreshPlusBtnPermission(btn, { force = false } = {}) {
+    const perms = await getClientPermissions({ force });
+    reflectPlusBtnState(btn, perms);
+    return perms;
   }
 
   async function evoFetchProfileByNumber(numberDigits) {
@@ -979,10 +998,18 @@ import { state } from '../state/store.js';
       dr.classList.remove('is-open');
     };
 
-    const open = () => {
-      buildRoot();
+    const open = async () => {
       back.classList.add('is-open');
       dr.classList.add('is-open');
+
+      window.__NewChat?.setBody(`
+        <div class="nc-empty-state">
+          <div class="nc-empty-title">Carregando…</div>
+          <div class="nc-empty-sub">Verificando suas permissões.</div>
+        </div>
+      `);
+
+      await buildRoot();
       setTimeout(() => $('#ncSearch')?.focus(), 40);
     };
 
@@ -1166,7 +1193,19 @@ import { state } from '../state/store.js';
     });
   }
 
-  function buildQuickActionsHtml() {
+  function buildQuickActionsHtml(perms) {
+    const newContact = perms?.create
+      ? `
+        <button id="ncNewContact" class="nc-quick-item" type="button">
+          <span class="nc-action-icon"><i class="fa fa-user-plus"></i></span>
+          <span class="nc-quick-copy">
+            <span class="nc-quick-title">Novo contato</span>
+            <span class="nc-quick-sub">Criar contato manualmente</span>
+          </span>
+        </button>
+      `
+      : '';
+
     return `
       <div class="nc-quick-list">
         <button id="ncNewGroup" class="nc-quick-item" type="button">
@@ -1176,14 +1215,7 @@ import { state } from '../state/store.js';
             <span class="nc-quick-sub">Criar um grupo manualmente</span>
           </span>
         </button>
-
-        <button id="ncNewContact" class="nc-quick-item" type="button">
-          <span class="nc-action-icon"><i class="fa fa-user-plus"></i></span>
-          <span class="nc-quick-copy">
-            <span class="nc-quick-title">Novo contato</span>
-            <span class="nc-quick-sub">Criar contato manualmente</span>
-          </span>
-        </button>
+        ${newContact}
       </div>
     `;
   }
@@ -1423,8 +1455,8 @@ import { state } from '../state/store.js';
     }, 320);
   }
 
-  function wireRootEvents() {
-    pickerState.cacheItems = collectLoadedContacts();
+  function wireRootEvents(perms) {
+    pickerState.cacheItems = perms?.view ? collectLoadedContacts() : [];
     pickerState.dbItems = [];
     pickerState.query = '';
     pickerState.offset = 0;
@@ -1435,40 +1467,51 @@ import { state } from '../state/store.js';
 
     $('#ncCloseTop')?.addEventListener('click', () => window.__NewChat?.close());
 
-    $('#ncNewContact')?.addEventListener('click', renderNewContactForm);
+    if (perms?.create) {
+      $('#ncNewContact')?.addEventListener('click', renderNewContactForm);
+    }
 
     $('#ncNewGroup')?.addEventListener('click', () => {
       toast('Criação de grupo pelo painel entra em breve.', true, 2600);
     });
 
-    $('#ncSearch')?.addEventListener('input', (e) => {
-      schedulePickerSearch(e.target?.value || '');
-    });
+    if (perms?.view) {
+      $('#ncSearch')?.addEventListener('input', (e) => {
+        schedulePickerSearch(e.target?.value || '');
+      });
 
-    const scrollHost = document.querySelector('#ncDrawer .nc-scroll-area');
+      const scrollHost = document.querySelector('#ncDrawer .nc-scroll-area');
 
-    scrollHost?.addEventListener('scroll', () => {
-      const distanceFromBottom = scrollHost.scrollHeight - scrollHost.scrollTop - scrollHost.clientHeight;
+      scrollHost?.addEventListener('scroll', () => {
+        const distanceFromBottom = scrollHost.scrollHeight - scrollHost.scrollTop - scrollHost.clientHeight;
 
-      if (distanceFromBottom <= 140) {
-        loadPickerPage({ reset: false, reason: 'scroll' });
-      }
-    }, { passive: true });
+        if (distanceFromBottom <= 140) {
+          loadPickerPage({ reset: false, reason: 'scroll' });
+        }
+      }, { passive: true });
 
-    scrollHost?.addEventListener('wheel', (event) => {
-      if (Number(event?.deltaY || 0) <= 0) return;
+      scrollHost?.addEventListener('wheel', (event) => {
+        if (Number(event?.deltaY || 0) <= 0) return;
 
-      const distanceFromBottom = scrollHost.scrollHeight - scrollHost.scrollTop - scrollHost.clientHeight;
+        const distanceFromBottom = scrollHost.scrollHeight - scrollHost.scrollTop - scrollHost.clientHeight;
 
-      if (distanceFromBottom <= 140) {
-        loadPickerPage({ reset: false, reason: 'wheel-bottom' });
-      }
-    }, { passive: true });
+        if (distanceFromBottom <= 140) {
+          loadPickerPage({ reset: false, reason: 'wheel-bottom' });
+        }
+      }, { passive: true });
 
-    renderPickerContacts('');
+      renderPickerContacts('');
+    }
   }
 
-  function renderNewContactForm() {
+  async function renderNewContactForm() {
+    const perms = await getClientPermissions({ force: true });
+
+    if (!perms.create) {
+      toast('Você não tem permissão para criar clientes.', false, 3000);
+      return;
+    }
+
     const body = `
       <div class="nc-wpp-head nc-wpp-head--form">
         <button id="ncBack" class="nc-nav-btn" type="button" aria-label="Voltar">
@@ -1568,8 +1611,32 @@ import { state } from '../state/store.js';
     $('#ncName')?.focus();
   }
 
-  function buildRoot() {
+  async function buildRoot() {
     if (!window.__NewChat) return;
+
+    const perms = await getClientPermissions({ force: true });
+    const searchHtml = perms.view
+      ? `
+        <div class="nc-search-wrap">
+          <div class="nc-search-row">
+            <i class="fa fa-search"></i>
+            <input id="ncSearch" class="nc-search-input" type="text" placeholder="Pesquisar nome ou número" autocomplete="off">
+          </div>
+        </div>
+      `
+      : '';
+
+    const contactsHtml = perms.view
+      ? `
+        <div id="ncContactResults" class="nc-contact-results"></div>
+        <div id="ncPickerStatus" class="nc-picker-status" aria-live="polite"></div>
+      `
+      : `
+        <div class="nc-empty-state">
+          <div class="nc-empty-title">Clientes indisponíveis</div>
+          <div class="nc-empty-sub">Seu acesso não possui a permissão “Ver clientes”.</div>
+        </div>
+      `;
 
     const html = `
       <div class="nc-wpp-head">
@@ -1579,26 +1646,27 @@ import { state } from '../state/store.js';
         <div class="nc-drawer-title">Nova conversa</div>
       </div>
 
-      <div class="nc-search-wrap">
-        <div class="nc-search-row">
-          <i class="fa fa-search"></i>
-          <input id="ncSearch" class="nc-search-input" type="text" placeholder="Pesquisar nome ou número" autocomplete="off">
-        </div>
-      </div>
+      ${searchHtml}
 
       <div class="nc-scroll-area">
-        ${buildQuickActionsHtml()}
-        <div id="ncContactResults" class="nc-contact-results"></div>
-        <div id="ncPickerStatus" class="nc-picker-status" aria-live="polite"></div>
+        ${buildQuickActionsHtml(perms)}
+        ${contactsHtml}
       </div>
     `;
 
     window.__NewChat.setBody(html);
-    wireRootEvents();
+    wireRootEvents(perms);
   }
 
   async function onSaveContact(ev) {
     ev.preventDefault();
+
+    const perms = await getClientPermissions({ force: true });
+
+    if (!perms.create) {
+      toast('Você não tem permissão para criar clientes.', false, 3000);
+      return;
+    }
 
     if (!hasSelectedInstance()) {
       toast('Selecione o WhatsApp para enviar mensagens.', false, 3000);
@@ -1618,7 +1686,7 @@ import { state } from '../state/store.js';
     if (!e164) return;
 
     const btnSave = $('#ncSave');
-    const originalLabel = String(btnSave?.textContent || 'Salvar contato');
+    const originalHtml = btnSave?.innerHTML || 'Salvar contato';
     const canonical = insert9IfNeeded(e164);
     const inst = getSelectedInstance();
     const controller = new AbortController();
@@ -1631,7 +1699,13 @@ import { state } from '../state/store.js';
 
     btnSave?.setAttribute('disabled', 'disabled');
     btnSave?.setAttribute('aria-busy', 'true');
-    if (btnSave) btnSave.textContent = 'Salvando…';
+    btnSave?.classList.add('is-loading');
+    if (btnSave) {
+      btnSave.innerHTML = `
+        <i class="fa fa-spinner fa-spin" aria-hidden="true"></i>
+        <span>Salvando contato...</span>
+      `;
+    }
 
     try {
       /*
@@ -1643,8 +1717,8 @@ import { state } from '../state/store.js';
         nome: nomeManual || 'Cliente',
         nome_completo: nomeManual || null,
         telefone: canonical,
-        // Permite criar o contato mínimo usando atendimento.enviar, sem liberar
-        // o módulo completo de cadastro de clientes para o colaborador.
+        // Marca apenas a origem da ação. A autorização continua exigindo
+        // clientes.criar no backend.
         origem_atendimento: true,
       };
 
@@ -1759,7 +1833,8 @@ import { state } from '../state/store.js';
       if (timeoutId) clearTimeout(timeoutId);
       btnSave?.removeAttribute('disabled');
       btnSave?.removeAttribute('aria-busy');
-      if (btnSave) btnSave.textContent = originalLabel;
+      btnSave?.classList.remove('is-loading');
+      if (btnSave) btnSave.innerHTML = originalHtml;
     }
   }
 
@@ -1801,6 +1876,7 @@ import { state } from '../state/store.js';
     }
 
     reflectPlusBtnState(btn);
+    refreshPlusBtnPermission(btn, { force: true }).catch(() => {});
 
     if (!btn.dataset.boundNewChat) {
       btn.dataset.boundNewChat = '1';
@@ -1824,7 +1900,7 @@ import { state } from '../state/store.js';
       btn.__instEvtBound = true;
 
       document.addEventListener('inst:change', () => {
-        reflectPlusBtnState(btn);
+        refreshPlusBtnPermission(btn).catch(() => reflectPlusBtnState(btn));
       });
     }
   }

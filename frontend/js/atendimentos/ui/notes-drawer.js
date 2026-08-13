@@ -10,6 +10,8 @@
 // ✅ LocalStorage por conversation_key para não misturar instâncias
 // ✅ Backend só é chamado para contato individual (kind = c)
 
+import { getClientPermissions } from '../core/client-permissions.js';
+
 (function () {
   if (window.__zcNotesLoaded) return;
   window.__zcNotesLoaded = true;
@@ -279,6 +281,21 @@
     return baseFetch(url, Object.assign({}, opt, { headers }));
   }
 
+  function permissionToast(message) {
+    const toast = window.ZCHeaderActions?.toast;
+
+    if (typeof toast === 'function') {
+      toast({
+        title: 'Sem permissão',
+        msg: message,
+        type: 'error',
+      });
+      return;
+    }
+
+    console.warn('[NOTES][PERMISSION]', message);
+  }
+
   /* ---------- status ---------- */
   let statusTimeout = null;
   let hideTimeout = null;
@@ -354,6 +371,10 @@
   /* ---------- BD: carregar ---------- */
   async function loadFromBackend(ctx) {
     if (!ctx || !ctx.clienteId || ctx.kind !== 'c') return;
+
+    const perms = await getClientPermissions();
+    if (!perms.view) return;
+
     const expectedKey = makeKey(ctx);
 
     try {
@@ -395,6 +416,12 @@
   async function saveToBackend(ctx, txt) {
     if (!ctx || !ctx.clienteId || ctx.kind !== 'c') {
       showStatus('Notas salvas apenas neste navegador para esta conversa.', 'ok');
+      return false;
+    }
+
+    const perms = await getClientPermissions({ force: true });
+    if (!perms.view || !perms.edit) {
+      showStatus('Você não tem permissão para editar clientes.', 'err');
       return false;
     }
 
@@ -479,7 +506,21 @@
 
     document.body.append(backdrop, drawer);
 
-    function open() {
+    async function open() {
+      const ctx = getCtx();
+      let canEdit = true;
+
+      if (ctx.kind === 'c') {
+        const perms = await getClientPermissions({ force: true });
+
+        if (!perms.view) {
+          permissionToast('Você não tem permissão para visualizar clientes.');
+          return;
+        }
+
+        canEdit = !!perms.edit;
+      }
+
       backdrop.classList.add('is-open');
       drawer.classList.add('is-open');
       try { document.querySelector('main')?.setAttribute('inert', ''); } catch {}
@@ -487,9 +528,18 @@
       clearStatus();
 
       const ta = document.getElementById('zcNotesText');
-      if (ta) ta.value = '';
+      const saveBtn = document.getElementById('zcNotesSave');
 
-      const ctx = getCtx();
+      if (ta) {
+        ta.value = '';
+        ta.readOnly = ctx.kind === 'c' && !canEdit;
+        ta.setAttribute('aria-readonly', ta.readOnly ? 'true' : 'false');
+      }
+
+      if (saveBtn) {
+        saveBtn.hidden = ctx.kind === 'c' && !canEdit;
+        saveBtn.disabled = ctx.kind === 'c' && !canEdit;
+      }
 
       const localTxt = loadFromStorage(ctx);
       if (ta && localTxt) ta.value = localTxt;
@@ -497,6 +547,9 @@
       if (ctx.kind !== 'c') {
         showStatus('Notas locais para esta conversa. Sincronização com servidor só para contatos.', 'ok');
       } else {
+        if (!canEdit) {
+          showStatus('Somente visualização. Você não tem permissão para editar clientes.', 'ok');
+        }
         loadFromBackend(ctx);
       }
 
@@ -517,6 +570,7 @@
     const ta = document.getElementById('zcNotesText');
     if (ta) {
       ta.addEventListener('input', () => {
+        if (ta.readOnly) return;
         const ctx = getCtx();
         saveToStorage(ctx, ta.value || '');
       });
@@ -524,11 +578,15 @@
 
     document.getElementById('zcNotesSave')?.addEventListener('click', async () => {
       const textarea = document.getElementById('zcNotesText');
+      if (textarea?.readOnly) return;
+
       const txt = (textarea?.value || '').trim();
       const ctx = getCtx();
 
-      saveToStorage(ctx, txt || '');
-      await saveToBackend(ctx, txt);
+      const saved = await saveToBackend(ctx, txt);
+      if (saved || ctx.kind !== 'c') {
+        saveToStorage(ctx, txt || '');
+      }
     });
 
     window.zcNotes = { open, close };

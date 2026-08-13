@@ -5,6 +5,8 @@
 // - Não mexe no telefone.
 // - Atualiza header/lista/cache local na hora.
 
+import { getClientPermissions } from '../core/client-permissions.js';
+
 (function () {
   'use strict';
 
@@ -14,6 +16,16 @@
 
   const BTN_ID = 'btnEditarNomeCliente';
   const MODAL_ID = 'zcEditarNomeClienteModal';
+
+  let CLIENT_EDIT_ALLOWED = false;
+  let CLIENT_PERMISSION_LOADED = false;
+
+  async function refreshClientEditPermission({ force = false } = {}) {
+    const perms = await getClientPermissions({ force });
+    CLIENT_PERMISSION_LOADED = true;
+    CLIENT_EDIT_ALLOWED = !!(perms.view && perms.edit);
+    return CLIENT_EDIT_ALLOWED;
+  }
 
   function $(sel, root = document) {
     try { return root.querySelector(sel); } catch { return null; }
@@ -273,7 +285,14 @@
     return modal;
   }
 
-  function openModal() {
+  async function openModal() {
+    const allowed = await refreshClientEditPermission({ force: true });
+
+    if (!allowed) {
+      showToast('Você não tem permissão para editar clientes.', false);
+      return;
+    }
+
     const conv = getCurrentConversation();
     if (!conv.entityId || conv.kind === 'g') {
       showToast('Abra uma conversa de cliente para editar o nome.', false);
@@ -298,6 +317,13 @@
   }
 
   async function saveName() {
+    const allowed = await refreshClientEditPermission({ force: true });
+
+    if (!allowed) {
+      showToast('Você não tem permissão para editar clientes.', false);
+      return;
+    }
+
     const conv = getCurrentConversation();
     const input = document.getElementById('zcEditNameInput');
     const btn = document.querySelector('[data-zc-edit-name-save]');
@@ -437,7 +463,7 @@
     const title = document.getElementById('chat-title') || $('#chat-header .title') || $('#chat-header .chat-title');
     const hdr = currentHeader();
 
-    if (!title || !hdr || !conv.entityId || conv.kind === 'g') {
+    if (!CLIENT_PERMISSION_LOADED || !CLIENT_EDIT_ALLOWED || !title || !hdr || !conv.entityId || conv.kind === 'g') {
       const old = document.getElementById(BTN_ID);
       if (old) old.style.display = 'none';
       return;
@@ -495,6 +521,10 @@
     ensureStyles();
     bindMenuFallback();
     ensureButton();
+
+    refreshClientEditPermission({ force: true })
+      .then(() => ensureButton())
+      .catch(() => ensureButton());
 
     [
       'zc:conversation-selected',

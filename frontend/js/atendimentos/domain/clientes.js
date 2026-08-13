@@ -42,6 +42,7 @@ const LIST_ERROR_TEXT = 'Não conseguimos carregar suas conversas.';
 const LIST_ERROR_SUBTEXT = 'Verifique sua conexão com a internet e tente novamente.';
 const LIST_ERROR_SUPPORT_TEXT = 'Se o problema continuar, entre em contato com o suporte.';
 const LIST_AUTO_RETRY_DELAYS_MS = [650, 1400];
+const LOAD_MORE_MAX_AUTO_PAGES = 6;
 
 let __loadingConversasPromise = null;
 let __lastConversasFetchAt = 0;
@@ -49,6 +50,7 @@ let __lastConversasKey = '';
 let __scheduledLoadTimer = null;
 let __loadingMoreConversas = false;
 let __lastConversasUsedSafeFallback = false;
+const __loadMoreSeenCursors = new Set();
 
 if (typeof window !== 'undefined') {
   if (window.PREFETCH_HISTORIES === undefined) {
@@ -1657,6 +1659,10 @@ function buildMsgsUrl(convKeyOrItem, instanciaId, extra = {}) {
   const parsed = parseConversationKey(typeof convKeyOrItem === 'object' ? convKeyOf(convKeyOrItem) : convKeyOrItem);
   const instFinal = instanciaId ?? parsed?.instId ?? null;
 
+  if (parsed?.kind === 'c' || parsed?.kind === 'g') {
+    qs.set('kind', String(parsed.kind));
+  }
+
   if (instFinal != null && instFinal !== '' && instFinal !== 'all') {
     qs.set('instancia_id', String(instFinal));
   }
@@ -2046,14 +2052,22 @@ function extractConversasPayload(payload) {
           ? payload.data
           : [];
 
-  const next =
+  const hasMoreExplicit =
+    typeof payload?.has_more === 'boolean'
+      ? payload.has_more
+      : (typeof payload?.hasMore === 'boolean' ? payload.hasMore : null);
+
+  const rawNext =
     payload?.next_cursor ??
     payload?.nextCursor ??
     payload?.cursor_next ??
     payload?.cursor ??
     null;
 
-  return { items, next };
+  // Se o backend afirmar que acabou, não mantém cursor antigo por engano.
+  const next = hasMoreExplicit === false ? null : rawNext;
+
+  return { items, next, hasMore: hasMoreExplicit };
 }
 
 function itemInstValues(c) {
@@ -2345,6 +2359,8 @@ export async function carregarClientes({ force = false, reason = '', noLoading =
         return all;
       }
 
+      // Uma carga da primeira página inicia uma nova sessão de paginação.
+      __loadMoreSeenCursors.clear();
       syncActiveConvs(all, next);
 
       if (all.length) {
@@ -2420,86 +2436,165 @@ export async function carregarClientes({ force = false, reason = '', noLoading =
 export function wireListaInfiniteScroll() {}
 
 export async function loadMoreConversas() {
-  if (__loadingMoreConversas) return;
+  if (__loadingMoreConversas) {
+    return { ok: true, added: 0, busy: true, done: !state.nextCursor };
+  }
 
-  const cursor = state.nextCursor;
-  if (!cursor) return;
+  if (!state.nextCursor) {
+    return { ok: true, added: 0, done: true };
+  }
 
   __loadingMoreConversas = true;
 
   try {
-    const url = buildConversasListUrl({
-      limit: 20,
-      cursor,
-      includeEmpresa: !__lastConversasUsedSafeFallback,
-      includeInst: !__lastConversasUsedSafeFallback,
-    });
-
-    const r = await fetch(url, { credentials: 'include' });
-
-    if (!r.ok) return;
-
-    const data = await r.json();
-
-    const { items, next } = extractConversasPayload(data);
-    const mais = normalizeAndFilterConversas(items, 'loadMoreConversas');
-
-    const map = new Map(
-      (state.clientesCache || []).map((c) => [String(convKeyOf(c) || ''), normalizeCliente(c)])
+    const knownKeys = new Set(
+      (state.clientesCache || [])
+        .map((c) => String(convKeyOf(c) || ''))
+        .filter(Boolean)
     );
 
-    for (const it of mais) {
-      const key = String(convKeyOf(it) || '');
-      if (!key) continue;
+    let totalAdded = 0;
+    let pagesTried = 0;
 
-      const prev = map.get(key) || {};
-      const merged = mergeConversaCanonica({ ...prev, ...it }, prev);
+    while (state.nextCursor && pagesTried < LOAD_MORE_MAX_AUTO_PAGES) {
+      const cursor = state.nextCursor;
+      const cursorKey = String(cursor);
 
-      merged.pinned = Boolean((prev && prev.pinned) || it.pinned);
+      // Defesa contra backend devolvendo o mesmo cursor em loop.
+      if (__loadMoreSeenCursors.has(cursorKey)) {
+        try {
+          console.warn('[clientes] cursor de paginação repetido; encerrando paginação.', { cursor });
+        } catch {}
 
-      merged.is_group = Boolean(
-        merged.is_group ||
-        prev?.is_group ||
-        it?.is_group ||
-        convKindOf(merged) === 'g' ||
-        isGroupJid(merged.telefone) ||
-        isGroupJid(merged.jid) ||
-        isGroupJid(merged.remoteJid)
+        syncActiveConvs(state.clientesCache || [], null);
+        renderListaClientes(state.clientesCache || []);
+        return { ok: true, added: totalAdded, done: true, repeatedCursor: true };
+      }
+
+      pagesTried += 1;
+
+      const url = buildConversasListUrl({
+        limit: 20,
+        cursor,
+        includeEmpresa: !__lastConversasUsedSafeFallback,
+        includeInst: !__lastConversasUsedSafeFallback,
+      });
+
+      const r = await fetch(url, {
+        credentials: 'include',
+        cache: 'no-store',
+      });
+
+      if (!r.ok) {
+        let detail = '';
+        try {
+          const body = await r.clone().json();
+          detail = String(body?.detail || body?.message || '').trim();
+        } catch {}
+
+        const err = new Error(`HTTP ${r.status}${detail ? ` - ${detail}` : ''}`);
+        err.status = r.status;
+        throw err;
+      }
+
+      const data = await r.json();
+      __loadMoreSeenCursors.add(cursorKey);
+
+      const { items, next } = extractConversasPayload(data);
+      const mais = normalizeAndFilterConversas(items, 'loadMoreConversas');
+
+      const map = new Map(
+        (state.clientesCache || []).map((c) => [String(convKeyOf(c) || ''), normalizeCliente(c)])
       );
 
-      if (merged.is_group) {
-        const keep =
-          merged.jid ||
-          merged.remoteJid ||
-          prev?.jid ||
-          prev?.remoteJid ||
-          it?.jid ||
-          it?.remoteJid ||
-          merged.telefone ||
-          prev?.telefone ||
-          it?.telefone ||
-          '';
+      let addedThisPage = 0;
 
-        if (keep) merged.telefone = keep;
-        merged.telefone_norm = '';
-      } else {
-        if (!merged.telefone_norm) {
+      for (const it of mais) {
+        const key = String(convKeyOf(it) || '');
+        if (!key) continue;
+
+        if (!knownKeys.has(key)) {
+          knownKeys.add(key);
+          addedThisPage += 1;
+        }
+
+        const prev = map.get(key) || {};
+        const merged = mergeConversaCanonica({ ...prev, ...it }, prev);
+
+        merged.pinned = Boolean((prev && prev.pinned) || it.pinned);
+
+        merged.is_group = Boolean(
+          merged.is_group ||
+          prev?.is_group ||
+          it?.is_group ||
+          convKindOf(merged) === 'g' ||
+          isGroupJid(merged.telefone) ||
+          isGroupJid(merged.jid) ||
+          isGroupJid(merged.remoteJid)
+        );
+
+        if (merged.is_group) {
+          const keep =
+            merged.jid ||
+            merged.remoteJid ||
+            prev?.jid ||
+            prev?.remoteJid ||
+            it?.jid ||
+            it?.remoteJid ||
+            merged.telefone ||
+            prev?.telefone ||
+            it?.telefone ||
+            '';
+
+          if (keep) merged.telefone = keep;
+          merged.telefone_norm = '';
+        } else if (!merged.telefone_norm) {
           merged.telefone_norm =
             prev?.telefone_norm ||
             it?.telefone_norm ||
             normalizaTelefoneBR(merged.telefone);
         }
+
+        map.set(key, normalizeCliente(merged));
       }
 
-      map.set(key, normalizeCliente(merged));
+      const arr = dedupeConversas([...map.values()]);
+      const requestedCursorKey = String(cursor);
+      const nextKey = next === null || next === undefined ? '' : String(next);
+
+      // Mesmo cursor = backend não avançou. Remove o botão para não criar loop.
+      const safeNext = nextKey && nextKey !== requestedCursorKey ? next : null;
+
+      if (nextKey && nextKey === requestedCursorKey) {
+        try {
+          console.warn('[clientes] backend devolveu o mesmo next_cursor; encerrando paginação.', {
+            cursor,
+            next,
+          });
+        } catch {}
+      }
+
+      syncActiveConvs(arr, safeNext);
+      totalAdded += addedThisPage;
+
+      // Se entrou conversa nova, já atualiza a lista e encerra este clique.
+      if (addedThisPage > 0) {
+        renderListaClientes(arr);
+        return { ok: true, added: totalAdded, done: !safeNext };
+      }
+
+      // Página só com duplicadas: avança automaticamente para a próxima, em vez
+      // de fazer o usuário clicar e aparentemente nada acontecer.
+      if (!safeNext) {
+        renderListaClientes(arr);
+        return { ok: true, added: totalAdded, done: true };
+      }
     }
 
-    const arr = dedupeConversas([...map.values()]);
-    syncActiveConvs(arr, next);
-
-    renderListaClientes(arr);
-
-    // Preview da lista vem do backend; histórico só é lido quando abrir a conversa.
+    // Limite defensivo atingido. Mantém o cursor já avançado para um próximo
+    // clique, mas renderiza o estado atual sem travar a interface.
+    renderListaClientes(state.clientesCache || []);
+    return { ok: true, added: totalAdded, done: !state.nextCursor, capped: true };
   } finally {
     __loadingMoreConversas = false;
   }
@@ -2520,16 +2615,96 @@ function wireListaClicks(ul) {
       ev.preventDefault();
       ev.stopPropagation();
 
-      if (!state.nextCursor) return;
+      if (!state.nextCursor || loadBtn.disabled) return;
 
-      loadBtn.disabled = true;
-      loadBtn.textContent = 'Carregando...';
+      const setButtonState = (kind) => {
+        if (!loadBtn.isConnected) return;
+
+        if (kind === 'loading') {
+          loadBtn.disabled = true;
+          loadBtn.setAttribute('aria-busy', 'true');
+          loadBtn.setAttribute('aria-label', 'Carregando mais conversas');
+          loadBtn.innerHTML = `
+            <span class="load-more-spinner" aria-hidden="true"></span>
+            <span>Carregando conversas...</span>`;
+          return;
+        }
+
+        loadBtn.removeAttribute('aria-busy');
+        loadBtn.disabled = false;
+
+        if (kind === 'error') {
+          loadBtn.setAttribute('aria-label', 'Não foi possível carregar. Tentar novamente');
+          loadBtn.innerHTML = `
+            <svg class="load-more-state-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 9v4m0 4h.01M10.3 3.7 2.9 17a2 2 0 0 0 1.75 3h14.7a2 2 0 0 0 1.75-3L13.7 3.7a2 2 0 0 0-3.4 0Z"></path>
+            </svg>
+            <span>Não foi possível carregar · Tentar novamente</span>`;
+          return;
+        }
+
+        loadBtn.setAttribute('aria-label', 'Carregar mais conversas');
+        loadBtn.textContent = 'Carregar mais conversas';
+      };
+
+      const showListFeedback = (kind, text, timeout = 2600) => {
+        if (!ul?.isConnected) return;
+
+        ul.querySelector('#lista-load-more-feedback')?.remove();
+
+        const feedback = document.createElement('li');
+        feedback.id = 'lista-load-more-feedback';
+        feedback.className = `chat-item load-more-item load-more-feedback is-${kind}`;
+        feedback.setAttribute('role', 'status');
+        feedback.setAttribute('aria-live', 'polite');
+
+        const icon = kind === 'done'
+          ? `<svg class="load-more-state-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6"></path></svg>`
+          : '';
+
+        feedback.innerHTML = `<span class="load-more-feedback-content">${icon}<span>${escapeHtml(text)}</span></span>`;
+        ul.appendChild(feedback);
+
+        if (timeout > 0) {
+          setTimeout(() => {
+            if (feedback.isConnected) feedback.remove();
+          }, timeout);
+        }
+      };
+
+      setButtonState('loading');
+      let failed = false;
 
       try {
-        await loadMoreConversas();
+        const result = await loadMoreConversas();
+
+        // Quando chegou ao fim, renderListaClientes remove o botão. Mostramos
+        // um retorno curto no mesmo lugar para o clique nunca parecer ignorado.
+        if (result?.done) {
+          showListFeedback('done', 'Todas as conversas foram carregadas');
+        }
+      } catch (e) {
+        failed = true;
+        try { console.error('[clientes] carregar mais conversas falhou:', e); } catch {}
+
+        const status = errorStatus(e);
+        if (status === 401) {
+          redirectToLoginAfterExpiredSession();
+          return;
+        }
+
+        // O erro fica visível no próprio botão e permite uma nova tentativa.
+        setButtonState('error');
+
+        setTimeout(() => {
+          if (!loadBtn.isConnected) return;
+          setButtonState('idle');
+        }, 2800);
       } finally {
-        loadBtn.disabled = false;
-        loadBtn.textContent = 'Carregar mais conversas';
+        // Se a lista não foi rerenderizada, restaura o botão após uma carga válida.
+        if (!failed && loadBtn.isConnected) {
+          setButtonState('idle');
+        }
       }
 
       return;

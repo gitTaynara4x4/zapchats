@@ -15,6 +15,8 @@
   const resTotalEl       = $('#resTotal');
   const resValidosEl     = $('#resValidos');
   const resInvalidosEl   = $('#resInvalidos');
+  const resDuplicadosEl  = $('#resDuplicados');
+  const resVariacaoEl    = $('#resVariacao');
   const resDelayEl       = $('#resDelay');
   const resEstimativaEl  = $('#resEstimativa');
   const resumeStateEl    = $('#resumeState');
@@ -28,6 +30,11 @@
   const connectionChipEl = $('#connectionChip');
   const instMenuBtnEl     = $('#instMenuBtn');
   const messageCounterEl  = $('#messageCounter');
+  const messageStatusEl   = $('#messageStatusBadge');
+  const contactsStatusEl  = $('#contactsStatusBadge');
+  const contactCountEl    = $('#contactCountLabel');
+  const btnPasteContacts  = $('#btnPasteContacts');
+  const btnAlterarInst    = $('#btnAlterarInstancia');
   const metricAtivasEl    = $('#metricAtivas');
   const metricPendentesEl = $('#metricPendentes');
   const metricEnviadosEl  = $('#metricEnviados');
@@ -85,6 +92,7 @@
   let autoRefreshTimer = null;
   let pendingRequestId = null;
   let pendingRequestFingerprint = null;
+  let iaPreviewVariation = 0;
 
   const TEMPLATES = {
     cobranca: 'Olá! Tudo bem? Passando para lembrar sobre sua pendência em aberto. Se quiser, posso te enviar os detalhes e as formas de pagamento por aqui.',
@@ -242,21 +250,33 @@
     const seen = new Set();
     const valid = [];
     const invalid = [];
+    let duplicates = 0;
+    let informed = 0;
 
     for (const part of parts) {
       const value = part.trim();
       if (!value) continue;
+      informed += 1;
       const normalized = normalizeBrazilPhone(value);
-      if (!normalized) { invalid.push({ raw: value, digits: value.replace(/\D+/g, '') }); continue; }
-      if (dedupEl?.checked && seen.has(normalized)) continue;
+      if (!normalized) {
+        invalid.push({ raw: value, digits: value.replace(/\D+/g, '') });
+        continue;
+      }
+      if (seen.has(normalized)) {
+        duplicates += 1;
+        if (dedupEl?.checked !== false) continue;
+      }
       seen.add(normalized);
       valid.push({ raw: value, digits: normalized });
     }
 
-    if (resTotalEl) resTotalEl.textContent = String(valid.length + invalid.length);
+    if (resTotalEl) resTotalEl.textContent = String(informed);
     if (resValidosEl) resValidosEl.textContent = String(valid.length);
     if (resInvalidosEl) resInvalidosEl.textContent = String(invalid.length);
-    return { valid, invalid };
+    if (resDuplicadosEl) resDuplicadosEl.textContent = String(duplicates);
+    if (contactCountEl) contactCountEl.textContent = `${valid.length} ${valid.length === 1 ? 'contato válido' : 'contatos válidos'}`;
+
+    return { valid, invalid, duplicates, informed };
   }
 
   function saveDraft() {
@@ -266,6 +286,7 @@
         numeros: numsEl?.value || '',
         delay: delayEl?.value || '20',
         dedup: !!dedupEl?.checked,
+        variar_mensagem: !!chkIaVariar?.checked,
         saved_at: Date.now()
       };
       localStorage.setItem(DRAFT_KEY, JSON.stringify(payload));
@@ -290,6 +311,9 @@
       if (dedupEl && typeof draft?.dedup === 'boolean') {
         dedupEl.checked = draft.dedup;
       }
+      if (chkIaVariar && typeof draft?.variar_mensagem === 'boolean') {
+        chkIaVariar.checked = draft.variar_mensagem;
+      }
       return true;
     } catch {
       return false;
@@ -301,7 +325,7 @@
   }
 
   function updateResumo() {
-    const { valid, invalid } = parseNumeros();
+    const { valid, invalid, duplicates, informed } = parseNumeros();
     const instName = (window.__INST_NAME || '').trim();
     const delay = getDelayValue();
     const totalSeg = valid.length > 0 ? Math.max(0, (valid.length - 1) * delay) : 0;
@@ -317,6 +341,28 @@
     const messageLength = (msgEl?.value || '').length;
     if (messageCounterEl) messageCounterEl.textContent = `${messageLength} / 4096`;
     const hasMsg = !!(msgEl?.value || '').trim();
+
+    if (messageStatusEl) {
+      messageStatusEl.textContent = hasMsg ? `${messageLength} caracteres` : 'Aguardando mensagem';
+      messageStatusEl.dataset.kind = hasMsg ? 'ok' : '';
+    }
+    if (contactsStatusEl) {
+      if (valid.length > 0 && invalid.length === 0) {
+        contactsStatusEl.textContent = `${valid.length} ${valid.length === 1 ? 'válido' : 'válidos'}`;
+        contactsStatusEl.dataset.kind = 'ok';
+      } else if (invalid.length > 0) {
+        contactsStatusEl.textContent = `${invalid.length} ${invalid.length === 1 ? 'inválido' : 'inválidos'}`;
+        contactsStatusEl.dataset.kind = 'warn';
+      } else {
+        contactsStatusEl.textContent = 'Nenhum contato';
+        contactsStatusEl.dataset.kind = '';
+      }
+    }
+    if (resVariacaoEl) {
+      const ativa = !!chkIaVariar?.checked;
+      resVariacaoEl.textContent = ativa ? 'Ativadas' : 'Desativadas';
+      resVariacaoEl.dataset.kind = ativa ? 'ok' : '';
+    }
     const hasInst = !!window.__INST_ID;
     const isConnected = window.__INST_CONNECTED !== false;
     const hasValid = valid.length > 0;
@@ -344,7 +390,11 @@
     } else if (invalid.length > 0) {
       resumeStateEl.textContent = 'Revisão recomendada';
       resumeStateEl.dataset.kind = 'soft';
-      summaryAdviceEl.textContent = 'Há números suspeitos ou curtos na lista. Revise antes de enviar.';
+      summaryAdviceEl.textContent = 'Há números inválidos na lista. Eles não entrarão na fila; revise se necessário.';
+    } else if (duplicates > 0) {
+      resumeStateEl.textContent = 'Pronto para disparar';
+      resumeStateEl.dataset.kind = 'ok';
+      summaryAdviceEl.textContent = `${duplicates} número(s) repetido(s) serão removidos automaticamente antes do envio.`;
     } else {
       resumeStateEl.textContent = 'Pronto para disparar';
       resumeStateEl.dataset.kind = 'ok';
@@ -371,6 +421,28 @@
     saveDraft();
   }
 
+  async function pasteContactsFromClipboard() {
+    if (!numsEl) return;
+    try {
+      if (!navigator.clipboard?.readText) throw new Error('clipboard_unavailable');
+      const text = await navigator.clipboard.readText();
+      const clean = String(text || '').trim();
+      if (!clean) {
+        showToast('A área de transferência está vazia.', 'info');
+        return;
+      }
+      const current = numsEl.value.trim();
+      numsEl.value = current ? `${current}\n${clean}` : clean;
+      updateResumo();
+      numsEl.focus();
+      showToast('Contatos colados da área de transferência.', 'success');
+    } catch (err) {
+      console.warn('Não foi possível ler a área de transferência', err);
+      showToast('Não consegui acessar a área de transferência. Use Ctrl+V dentro da lista.', 'error');
+      numsEl.focus();
+    }
+  }
+
   function useTemplate(key) {
     const text = TEMPLATES[key];
     if (!text || !msgEl) return;
@@ -394,6 +466,7 @@
     if (numsEl) numsEl.value = '';
     if (delayEl) delayEl.value = '20';
     if (dedupEl) dedupEl.checked = true;
+    if (chkIaVariar) chkIaVariar.checked = false;
     clearDraft();
     updateResumo();
     setStatus('', null);
@@ -444,7 +517,8 @@
     }
 
     openIaModal(draft, '');
-    setIaStatus('Chamando IA para melhorar sua mensagem...', 'info');
+    iaPreviewVariation += 1;
+    setIaStatus('Gerando uma versão inteligente da mensagem...', 'info');
 
     if (iaApplyBtn) iaApplyBtn.disabled = true;
     if (iaRegerarBtn) iaRegerarBtn.disabled = true;
@@ -454,7 +528,7 @@
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ mensagem: draft })
+        body: JSON.stringify({ mensagem: draft, variacao: iaPreviewVariation })
       });
 
       const txt = await res.text();
@@ -493,6 +567,7 @@
       return;
     }
 
+    iaPreviewVariation += 1;
     setIaStatus('Gerando outra variação...', 'info');
     if (iaApplyBtn) iaApplyBtn.disabled = true;
     if (iaRegerarBtn) iaRegerarBtn.disabled = true;
@@ -502,7 +577,7 @@
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ mensagem: draft })
+        body: JSON.stringify({ mensagem: draft, variacao: iaPreviewVariation })
       });
 
       const txt = await res.text();
@@ -838,7 +913,8 @@
     }
 
     const numeros = valid.map(v => v.raw);
-    const fingerprint = JSON.stringify([instId, delaySegundos, mensagem, numeros]);
+    const variarMensagem = !!chkIaVariar?.checked;
+    const fingerprint = JSON.stringify([instId, delaySegundos, mensagem, numeros, variarMensagem]);
     if (!pendingRequestId || pendingRequestFingerprint !== fingerprint) {
       pendingRequestId = window.crypto?.randomUUID?.() || `disp-${Date.now()}-${Math.random().toString(16).slice(2)}`;
       pendingRequestFingerprint = fingerprint;
@@ -851,6 +927,7 @@
       delay_segundos: delaySegundos,
       tipo_conteudo: 'text',
       midia_id: null,
+      variar_mensagem: variarMensagem,
       request_id: pendingRequestId
     };
   }
@@ -958,9 +1035,10 @@
     const delay = item.delay_segundos ?? item.delay ?? item.intervalo_segundos ?? null;
     if (msgEl && mensagem) msgEl.value = mensagem;
     if (delayEl && delay != null) delayEl.value = String(delay);
+    if (chkIaVariar && typeof item.variar_mensagem === 'boolean') chkIaVariar.checked = item.variar_mensagem;
     updateResumo();
     window.scrollTo({ top: 0, behavior: 'smooth' });
-    showToast('Mensagem e intervalo reaproveitados.', 'success');
+    showToast('Mensagem, intervalo e variação reaproveitados.', 'success');
   }
 
   async function cancelarHistorico(item, button) {
@@ -1295,9 +1373,8 @@
 
   function init() {
     if (chkIaVariar) {
-      chkIaVariar.checked = false;
-      chkIaVariar.disabled = true;
-      chkIaVariar.title = 'Em breve: variações por número ainda não estão implementadas no backend.';
+      chkIaVariar.disabled = false;
+      chkIaVariar.title = 'Gera automaticamente uma variação visível da mensagem para cada contato.';
     }
 
     const hadDraft = loadDraft();
@@ -1306,6 +1383,7 @@
     numsEl?.addEventListener('input', updateResumo);
     numsEl?.addEventListener('blur', updateResumo);
     dedupEl?.addEventListener('change', updateResumo);
+    chkIaVariar?.addEventListener('change', updateResumo);
     delayEl?.addEventListener('change', updateResumo);
     delayEl?.addEventListener('input', updateResumo);
 
@@ -1315,6 +1393,8 @@
 
     btnPreencherExemplo?.addEventListener('click', fillExample);
     btnLimparRascunho?.addEventListener('click', clearDraftUI);
+    btnPasteContacts?.addEventListener('click', pasteContactsFromClipboard);
+    btnAlterarInst?.addEventListener('click', () => instMenuBtnEl?.click());
 
     templateButtons.forEach(btn => {
       btn.addEventListener('click', () => useTemplate(btn.dataset.template));

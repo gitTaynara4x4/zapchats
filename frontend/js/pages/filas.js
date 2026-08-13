@@ -10,7 +10,7 @@
 (function FilasPage() {
   'use strict';
 
-  const PAGE_VERSION = 'zc-filas-chatbot-slides-v2';
+  const PAGE_VERSION = 'zc-filas-chatbot-visual-v2';
 
   if (window.__ZC_FILAS_PAGE_VERSION__ === PAGE_VERSION) return;
   window.__ZC_FILAS_PAGE_VERSION__ = PAGE_VERSION;
@@ -22,6 +22,7 @@
     editingId: null,
     helpSlide: 0,
     helpTotal: 4,
+    context: { chatbot_ativo: false, instances: [], departments: [] },
   };
 
   const $ = (sel, root = document) => root.querySelector(sel);
@@ -38,6 +39,8 @@
     btnNovaFila: $('#btnNovaFila'),
     btnNovaFilaEmpty: $('#btnNovaFilaEmpty'),
     btnComoFuncionaFilas: $('#btnComoFuncionaFilas'),
+    chatbotFilasGate: $('#chatbotFilasGate'),
+    queueContent: $$('.queue-requires-chatbot'),
 
     metricTotal: $('#metricTotal'),
     metricAtivas: $('#metricAtivas'),
@@ -63,6 +66,10 @@
     filaMensagem: $('#filaMensagem'),
     filaAtiva: $('#filaAtiva'),
     swFilaAtiva: $('#swFilaAtiva'),
+    filaRetornoAtivo: $('#filaRetornoAtivo'),
+    swFilaRetorno: $('#swFilaRetorno'),
+    filaRetornoCustomWrap: $('#filaRetornoCustomWrap'),
+    filaRetornoCustom: $('#filaRetornoCustom'),
     filaPreviewText: $('#filaPreviewText'),
 
     filasHelpModal: $('#filasHelpModal'),
@@ -77,6 +84,14 @@
 
     filaDepartamento: $('#filaDepartamento'),
     filaInstancias: $('#filaInstancias'),
+
+    filasContextPill: $('#filasContextPill'),
+    filasSummaryInstances: $('#filasSummaryInstances'),
+    filasSummaryDepartments: $('#filasSummaryDepartments'),
+    filasSummaryTotal: $('#filasSummaryTotal'),
+    filasSummaryActive: $('#filasSummaryActive'),
+    filasSummaryStatus: $('#filasSummaryStatus'),
+    filasReadyNote: $('#filasReadyNote'),
   };
 
   function markReady() {
@@ -258,6 +273,7 @@
   function setLoading(on) {
     state.loading = !!on;
 
+    const chatbotOff = !state.context?.chatbot_ativo;
     [
       els.btnNovaFila,
       els.btnNovaFilaEmpty,
@@ -265,7 +281,8 @@
       els.formFila?.querySelector('button[type="submit"]'),
     ].forEach((btn) => {
       if (!btn) return;
-      btn.disabled = !!on;
+      const requiresChatbot = btn === els.btnNovaFila || btn === els.btnNovaFilaEmpty || btn.closest?.('#formFila');
+      btn.disabled = !!on || (requiresChatbot && chatbotOff);
       btn.classList.toggle('is-loading', !!on);
     });
   }
@@ -307,6 +324,41 @@
     render();
   }
 
+  function renderSideSummary() {
+    const chatbotAtivo = !!state.context?.chatbot_ativo;
+    const instances = Array.isArray(state.context?.instances) ? state.context.instances.length : 0;
+    const departments = Array.isArray(state.context?.departments) ? state.context.departments.length : 0;
+    const total = state.filas.length;
+    const ativas = state.filas.filter((f) => !!f.ativa).length;
+
+    if (els.filasSummaryInstances) els.filasSummaryInstances.textContent = String(instances);
+    if (els.filasSummaryDepartments) els.filasSummaryDepartments.textContent = String(departments);
+    if (els.filasSummaryTotal) els.filasSummaryTotal.textContent = String(total);
+    if (els.filasSummaryActive) els.filasSummaryActive.textContent = String(ativas);
+
+    if (els.filasContextPill) {
+      els.filasContextPill.textContent = chatbotAtivo ? 'Ativo' : 'Aguardando';
+      els.filasContextPill.classList.toggle('is-ready', chatbotAtivo);
+      els.filasContextPill.classList.toggle('is-waiting', !chatbotAtivo);
+    }
+
+    if (els.filasSummaryStatus) {
+      els.filasSummaryStatus.innerHTML = chatbotAtivo
+        ? '<i></i>Pronto para filas'
+        : '<i></i>Aguardando Chatbot';
+      els.filasSummaryStatus.classList.toggle('is-ready', chatbotAtivo);
+      els.filasSummaryStatus.classList.toggle('is-waiting', !chatbotAtivo);
+    }
+
+    if (els.filasReadyNote) {
+      els.filasReadyNote.classList.toggle('is-ready', chatbotAtivo);
+      els.filasReadyNote.classList.toggle('is-waiting', !chatbotAtivo);
+      els.filasReadyNote.innerHTML = chatbotAtivo
+        ? '<i class="fa-solid fa-circle-check"></i><span>Chatbot configurado. As filas já podem receber conversas.</span>'
+        : '<i class="fa-solid fa-circle-info"></i><span>Configure o Chatbot para liberar as filas.</span>';
+    }
+  }
+
   function renderMetrics() {
     const total = state.filas.length;
     const ativas = state.filas.filter((f) => !!f.ativa).length;
@@ -315,12 +367,13 @@
       return p === 'alta' || p === 'urgente';
     }).length;
 
-    const slas = state.filas
-      .map((f) => Number(f.sla_minutos))
+    const tempos = state.filas
+      .filter((f) => !!f.retorno_inatividade_ativo)
+      .map((f) => Number(f.retorno_inatividade_minutos))
       .filter((n) => Number.isFinite(n) && n > 0);
 
-    const media = slas.length
-      ? Math.round(slas.reduce((a, b) => a + b, 0) / slas.length)
+    const media = tempos.length
+      ? Math.round(tempos.reduce((a, b) => a + b, 0) / tempos.length)
       : null;
 
     if (els.totalFilas) els.totalFilas.textContent = String(total);
@@ -328,6 +381,8 @@
     if (els.metricAtivas) els.metricAtivas.textContent = String(ativas);
     if (els.metricAlta) els.metricAlta.textContent = String(alta);
     if (els.metricSla) els.metricSla.textContent = media ? `${media} min` : '--';
+
+    renderSideSummary();
   }
 
   function renderCards() {
@@ -347,7 +402,7 @@
     els.tabelaFilas.innerHTML = rows.map((fila, idx) => {
       const id = Number(fila.id);
       const nome = escapeHtml(fila.nome || 'Fila');
-      const desc = escapeHtml(fila.descricao || 'Opção que o cliente poderá escolher no chatbot.');
+      const desc = escapeHtml(fila.descricao || 'Conversa aguardando atendimento dentro do departamento.');
       const msgRaw = String(fila.mensagem_padrao || '').trim();
       const msg = escapeHtml(msgRaw || 'Nenhuma mensagem padrão configurada.');
       const prioridade = escapeHtml(prioridadeLabel(fila.prioridade));
@@ -356,7 +411,7 @@
       const status = fila.ativa ? 'Ativa' : 'Inativa';
       const statusClass = fila.ativa ? 'is-active' : 'is-inactive';
       const dep = fila.departamento_nome ? escapeHtml(fila.departamento_nome) : 'Sem departamento fixo';
-      const sla = escapeHtml(slaText(fila.sla_minutos));
+      const retorno = fila.retorno_inatividade_ativo ? escapeHtml(slaText(fila.retorno_inatividade_minutos)) : 'Retorno desativado';
       const openClass = idx === 0 ? ' open' : '';
       const ariaExpanded = idx === 0 ? 'true' : 'false';
 
@@ -377,7 +432,7 @@
 
             <div class="right">
               <span class="prio-pill ${prioClass}">${prioridade}</span>
-              <span class="prio-pill">${sla}</span>
+              <span class="prio-pill">${retorno}</span>
               <i class="fa-solid fa-chevron-down chev"></i>
             </div>
           </header>
@@ -391,8 +446,8 @@
                 </div>
 
                 <div class="fila-info-box">
-                  <div class="k">Tempo ideal</div>
-                  <div class="v">${sla}</div>
+                  <div class="k">Volta sem resposta</div>
+                  <div class="v">${retorno}</div>
                 </div>
 
                 <div class="fila-info-box">
@@ -435,6 +490,105 @@
   function render() {
     renderMetrics();
     renderCards();
+  }
+
+  function selectedInstanceIds() {
+    if (!els.filaInstancias) return [];
+    return $$('input[type="checkbox"]', els.filaInstancias)
+      .filter((input) => input.checked)
+      .map((input) => Number(input.value))
+      .filter((n) => Number.isFinite(n) && n > 0);
+  }
+
+  function renderContextGate() {
+    const active = !!state.context?.chatbot_ativo;
+    if (els.chatbotFilasGate) els.chatbotFilasGate.hidden = active;
+    (els.queueContent || []).forEach((node) => { node.hidden = !active; });
+    if (els.btnNovaFila) {
+      els.btnNovaFila.hidden = !active;
+      els.btnNovaFila.disabled = state.loading || !active;
+    }
+    if (els.btnRestaurarFilas) els.btnRestaurarFilas.hidden = !active;
+    if (els.btnNovaFilaEmpty) els.btnNovaFilaEmpty.disabled = state.loading || !active;
+    renderSideSummary();
+  }
+
+  function renderInstanceOptions(selectedIds = []) {
+    if (!els.filaInstancias) return;
+    const selected = new Set((selectedIds || []).map(Number));
+    const rows = Array.isArray(state.context?.instances) ? state.context.instances : [];
+    els.filaInstancias.innerHTML = rows.map((inst) => {
+      const id = Number(inst.id);
+      const checked = selected.has(id) || (!selected.size && rows.length === 1);
+      return `
+        <label class="queue-check-option">
+          <input type="checkbox" value="${id}" ${checked ? 'checked' : ''}>
+          <span><i class="fa-brands fa-whatsapp"></i>${escapeHtml(inst.nome || `WhatsApp ${id}`)}</span>
+        </label>
+      `;
+    }).join('');
+  }
+
+  function renderDepartmentOptions(preferredId = null) {
+    if (!els.filaDepartamento) return;
+    const selectedIds = selectedInstanceIds();
+    const deps = Array.isArray(state.context?.departments) ? state.context.departments : [];
+    const allowed = deps.filter((dep) => {
+      const ids = new Set((dep.instancia_ids || []).map(Number));
+      return selectedIds.length > 0 && selectedIds.every((id) => ids.has(Number(id)));
+    });
+
+    const current = preferredId != null ? String(preferredId) : String(els.filaDepartamento.value || '');
+    const placeholder = selectedIds.length
+      ? (allowed.length ? 'Selecione o departamento' : 'Nenhum departamento disponível nesses WhatsApps')
+      : 'Selecione primeiro o WhatsApp';
+    els.filaDepartamento.innerHTML = `<option value="">${escapeHtml(placeholder)}</option>` + allowed.map((dep) => (
+      `<option value="${Number(dep.id)}">${escapeHtml(dep.nome || 'Departamento')}</option>`
+    )).join('');
+
+    if (current && allowed.some((dep) => String(dep.id) === current)) {
+      els.filaDepartamento.value = current;
+    }
+  }
+
+  async function loadContext() {
+    const empresaId = getEmpresaId();
+    if (!empresaId) return;
+    const params = new URLSearchParams({ empresa_id: String(empresaId) });
+    try {
+      const data = await apiJson('/api/filas/contexto?' + params.toString());
+      state.context = {
+        chatbot_ativo: !!data?.chatbot_ativo,
+        instances: Array.isArray(data?.instances) ? data.instances : [],
+        departments: Array.isArray(data?.departments) ? data.departments : [],
+      };
+    } catch (err) {
+      console.error('[filas] erro ao carregar contexto do chatbot', err);
+      state.context = { chatbot_ativo: false, instances: [], departments: [] };
+    }
+    renderContextGate();
+    renderInstanceOptions([]);
+    renderDepartmentOptions();
+  }
+
+  function retornoMinutosAtual() {
+    if (!els.filaRetornoAtivo?.checked) return null;
+    const raw = String(els.filaSla?.value || '5');
+    const value = raw === 'custom'
+      ? Number(els.filaRetornoCustom?.value || 0)
+      : Number(raw);
+    if (!Number.isFinite(value) || value < 1 || value > 1440) {
+      throw new Error('Informe um tempo de retorno entre 1 minuto e 24 horas.');
+    }
+    return Math.round(value);
+  }
+
+  function syncRetornoUi() {
+    setSwitch(els.swFilaRetorno, !!els.filaRetornoAtivo?.checked);
+    const custom = els.filaSla?.value === 'custom' && !!els.filaRetornoAtivo?.checked;
+    if (els.filaRetornoCustomWrap) els.filaRetornoCustomWrap.hidden = !custom;
+    if (els.filaSla) els.filaSla.disabled = !els.filaRetornoAtivo?.checked;
+    if (els.filaRetornoCustom) els.filaRetornoCustom.disabled = !custom;
   }
 
   async function loadFilas() {
@@ -491,39 +645,38 @@
   }
 
   function openModal(fila = null) {
-    const isEdit = !!fila;
-
-    state.editingId = isEdit ? Number(fila.id) : null;
-
-    if (els.modalFilaTitulo) {
-      els.modalFilaTitulo.textContent = isEdit ? 'Editar fila' : 'Nova fila';
+    if (!state.context?.chatbot_ativo) {
+      toast('Ative e configure o Chatbot de departamentos antes de criar uma fila.', 'info');
+      return;
     }
 
+    const isEdit = !!fila;
+    state.editingId = isEdit ? Number(fila.id) : null;
+
+    if (els.modalFilaTitulo) els.modalFilaTitulo.textContent = isEdit ? 'Editar fila' : 'Nova fila';
     if (els.filaId) els.filaId.value = isEdit ? String(fila.id) : '';
     if (els.filaNome) els.filaNome.value = isEdit ? String(fila.nome || '') : '';
     if (els.filaPrioridade) els.filaPrioridade.value = isEdit ? String(fila.prioridade || 'normal') : 'normal';
-    if (els.filaSla) els.filaSla.value = isEdit ? String(fila.sla_minutos || 10) : '10';
     if (els.filaCor) els.filaCor.value = isEdit ? String(fila.cor || 'verde') : 'verde';
     if (els.filaDescricao) els.filaDescricao.value = isEdit ? String(fila.descricao || '') : '';
     if (els.filaMensagem) els.filaMensagem.value = isEdit ? String(fila.mensagem_padrao || '') : '';
     if (els.filaAtiva) els.filaAtiva.checked = isEdit ? !!fila.ativa : true;
 
-    if (els.filaDepartamento) {
-      els.filaDepartamento.value = isEdit && fila.departamento_id ? String(fila.departamento_id) : '';
-    }
+    const returnEnabled = isEdit ? !!fila.retorno_inatividade_ativo : true;
+    const returnMinutes = Number(isEdit ? fila.retorno_inatividade_minutos : 5) || 5;
+    if (els.filaRetornoAtivo) els.filaRetornoAtivo.checked = returnEnabled;
+    const presets = [5, 10, 15, 30, 60];
+    if (els.filaSla) els.filaSla.value = presets.includes(returnMinutes) ? String(returnMinutes) : 'custom';
+    if (els.filaRetornoCustom) els.filaRetornoCustom.value = String(returnMinutes);
 
-    if (els.filaInstancias) {
-      const ids = Array.isArray(fila?.instancia_ids) ? fila.instancia_ids.map(String) : [];
-      $$('option', els.filaInstancias).forEach((opt) => {
-        opt.selected = ids.includes(String(opt.value));
-      });
-    }
+    const ids = isEdit && Array.isArray(fila?.instancia_ids) ? fila.instancia_ids.map(Number) : [];
+    renderInstanceOptions(ids);
+    renderDepartmentOptions(isEdit ? fila.departamento_id : null);
 
-    if (els.btnExcluirFila) {
-      els.btnExcluirFila.hidden = !isEdit;
-    }
+    if (els.btnExcluirFila) els.btnExcluirFila.hidden = !isEdit;
 
     syncAtivaSwitch();
+    syncRetornoUi();
     renderFormPreview();
 
     if (els.modalFila) {
@@ -533,10 +686,7 @@
     }
 
     setTimeout(() => {
-      try {
-        els.filaNome?.focus();
-        els.filaNome?.select?.();
-      } catch {}
+      try { els.filaNome?.focus(); els.filaNome?.select?.(); } catch {}
     }, 80);
   }
 
@@ -564,44 +714,34 @@
   function collectFormPayload() {
     const empresaId = getEmpresaId();
     const nome = String(els.filaNome?.value || '').trim();
+    if (!empresaId) throw new Error('Empresa não encontrada na sessão.');
+    if (!state.context?.chatbot_ativo) throw new Error('Configure o Chatbot de departamentos antes de usar filas.');
+    if (!nome) throw new Error('Informe o nome da fila.');
 
-    if (!empresaId) {
-      throw new Error('Empresa não encontrada na sessão.');
-    }
-
-    if (!nome) {
-      throw new Error('Informe o nome da fila.');
-    }
+    const instanciaIds = selectedInstanceIds();
+    if (!instanciaIds.length) throw new Error('Selecione ao menos um WhatsApp com Chatbot ativo.');
 
     const departamentoIdRaw = String(els.filaDepartamento?.value || '').trim();
     const departamentoId = departamentoIdRaw ? Number(departamentoIdRaw) : null;
+    if (!departamentoId) throw new Error('Selecione um departamento configurado no Chatbot.');
 
-    let instanciaIds = [];
-
-    if (els.filaInstancias) {
-      instanciaIds = $$('option', els.filaInstancias)
-        .filter((opt) => opt.selected && String(opt.value || '').trim())
-        .map((opt) => Number(opt.value))
-        .filter((n) => Number.isFinite(n) && n > 0);
-    }
+    const retornoAtivo = !!els.filaRetornoAtivo?.checked;
+    const retornoMinutos = retornoAtivo ? retornoMinutosAtual() : null;
 
     return {
       empresa_id: empresaId,
-
       nome,
       departamento_id: departamentoId,
       instancia_ids: instanciaIds,
-
       prioridade: String(els.filaPrioridade?.value || 'normal').trim() || 'normal',
-      sla_minutos: Number(els.filaSla?.value || 10),
-
+      sla_minutos: retornoMinutos,
+      retorno_inatividade_ativo: retornoAtivo,
+      retorno_inatividade_minutos: retornoMinutos,
       cor: String(els.filaCor?.value || 'verde').trim() || 'verde',
       descricao: String(els.filaDescricao?.value || '').trim() || null,
       mensagem_padrao: String(els.filaMensagem?.value || '').trim() || null,
-
       ativa: !!els.filaAtiva?.checked,
       ordem: 0,
-
       exigir_aceite: true,
       retorno_ao_liberar: true,
       auto_distribuir: false,
@@ -872,6 +1012,9 @@
     });
 
     els.filaAtiva?.addEventListener('change', syncAtivaSwitch);
+    els.filaRetornoAtivo?.addEventListener('change', syncRetornoUi);
+    els.filaSla?.addEventListener('change', syncRetornoUi);
+    els.filaInstancias?.addEventListener('change', () => renderDepartmentOptions());
 
     els.swFilaAtiva?.addEventListener('keydown', (ev) => {
       if (ev.key !== 'Enter' && ev.key !== ' ') return;
@@ -880,6 +1023,15 @@
       if (els.filaAtiva) {
         els.filaAtiva.checked = !els.filaAtiva.checked;
         els.filaAtiva.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    });
+
+    els.swFilaRetorno?.addEventListener('keydown', (ev) => {
+      if (ev.key !== 'Enter' && ev.key !== ' ') return;
+      ev.preventDefault();
+      if (els.filaRetornoAtivo) {
+        els.filaRetornoAtivo.checked = !els.filaRetornoAtivo.checked;
+        els.filaRetornoAtivo.dispatchEvent(new Event('change', { bubbles: true }));
       }
     });
 
@@ -926,11 +1078,21 @@
   async function init() {
     bindEvents();
     syncAtivaSwitch();
+    syncRetornoUi();
     renderFormPreview();
     setHelpSlide(0);
 
     try {
-      await loadFilas();
+      await loadContext();
+      if (state.context?.chatbot_ativo) {
+        await loadFilas();
+      } else {
+        state.filas = [];
+        state.filtradas = [];
+        render();
+        setLoading(false);
+        markReady();
+      }
     } catch {
       markReady();
     }

@@ -82,27 +82,23 @@
             />
           </svg>
         </span>
-        <span class="mic" aria-hidden="true">
-          <svg viewBox="0 0 24 24" fill="none">
-            <path
-              d="M12 14a3 3 0 0 0 3-3V7a3 3 0 0 0-6 0v4a3 3 0 0 0 3 3Z"
-              stroke="currentColor"
-              stroke-width="2"
-            />
-            <path
-              d="M19 11a7 7 0 0 1-14 0"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-            />
-          </svg>
-        </span>
       </div>`
       : '';
 
     const speedHtml = dir === 'out'
       ? `<button class="wa-speed" type="button">1.0x</button>`
       : '';
+
+    // Forma visual fixa e leve, usada apenas para dar aparência de waveform.
+    // O progresso real continua vindo do elemento Audio e de --p.
+    const waveform = [
+      34, 52, 28, 68, 44, 76, 38, 58, 84, 46, 64, 32,
+      72, 50, 88, 40, 62, 30, 78, 54, 36, 70, 48, 82,
+      42, 60, 26, 74, 52, 66, 38, 56, 80, 44, 62, 34
+    ];
+    const waveformBars = waveform
+      .map((h) => `<span style="--h:${h}%"></span>`)
+      .join('');
 
     return `
 <div class="wa-audio" data-src="${escapeHtml(list.join('|'))}" data-dir="${dir}">
@@ -117,8 +113,8 @@
 
   <div class="wa-main">
     <div class="wa-wave" role="slider" aria-label="Progresso" tabindex="0">
-      <div class="dots"></div>
-      <div class="fill"></div>
+      <div class="dots" aria-hidden="true">${waveformBars}</div>
+      <div class="fill" aria-hidden="true">${waveformBars}</div>
       <div class="knob"></div>
     </div>
 

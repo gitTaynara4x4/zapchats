@@ -13,14 +13,14 @@ import {
   coalesceDeptName,
   isAdminFlag
 } from './coalesce.js';
-import { invalidateAvatarThumb, mountMiniAvatarInto } from './avatar.js';
+import { invalidateAvatarThumb, mountMiniAvatarInto } from './avatar.js?v=colab-avatar-photo-20260810-1';
 import { toast, showConfirm } from './feedback.js';
 import { hasPerm } from './permissions.js';
 import { saveEmpresaLoginConfig } from './empresa.js';
 
 
 const LIST_SLOW_NOTICE_MS = 4500;
-const LIST_CACHE_VERSION = 'v1';
+const LIST_CACHE_VERSION = 'v2-avatar-20260809';
 const LIST_CACHE_FRESH_MS = 2 * 60 * 1000;
 const LIST_CACHE_MAX_AGE_MS = 30 * 60 * 1000;
 let listLoading = false;
@@ -317,6 +317,7 @@ function presenceInfo(c){
       status,
       label: 'Online agora',
       cls: 'online',
+      icon: 'fa-solid fa-circle',
       title: 'Esta pessoa está usando o ZapsChat agora.'
     };
   }
@@ -326,15 +327,18 @@ function presenceInfo(c){
       status,
       label: 'Ausente',
       cls: 'away',
+      icon: 'fa-solid fa-circle',
       title: 'O ZapsChat está aberto, mas a pessoa está ausente ou em outra aba.'
     };
   }
 
+  const hasLastAccess = !!c?.last_access_at;
   const label = formatLastAccess(c?.last_access_at);
   return {
     status: 'offline',
     label,
     cls: 'offline',
+    icon: hasLastAccess ? 'fa-regular fa-clock' : 'fa-regular fa-circle-question',
     title: label
   };
 }
@@ -644,7 +648,7 @@ export function renderLista(){
             </span>
             <span class="member-user" title="${escapeHTML(cargo || handleFrom(name, email))}">${escapeHTML(handleFrom(name, email))}</span>
             <span class="member-presence ${escapeHTML(presence.cls)}" title="${escapeHTML(presence.title)}">
-              <span class="presence-dot" aria-hidden="true"></span>
+              <i class="member-presence-icon ${escapeHTML(presence.icon)}" aria-hidden="true"></i>
               <span>${escapeHTML(presence.label)}</span>
             </span>
           </div>
@@ -660,7 +664,7 @@ export function renderLista(){
         <div class="team-tags">${teamHTML}${extraTeams}</div>
       </td>
       <td class="td-actions">
-        <button class="btn btn-ghost" data-action="view" data-id="${escapeHTML(id)}" title="Editar perfil" aria-label="Editar ${escapeHTML(name)}">
+        <button class="btn btn-ghost" data-action="edit" data-id="${escapeHTML(id)}" title="Editar colaborador" aria-label="Editar ${escapeHTML(name)}">
           <i class="fa fa-pen"></i>
         </button>
         ${isOwner ? '' : `
@@ -743,7 +747,7 @@ export function bindLista(){
   btnFiltrar?.addEventListener('click', renderLista);
 
   btnAdd?.addEventListener('click', async () => {
-    const mod = await import('./modal.js');
+    const mod = await import('./modal.js?v=colab-direct-edit-20260810-1');
     mod.openNovo();
   });
 
@@ -782,14 +786,19 @@ export function bindLista(){
     const raw = b.dataset.id;
     const id = Number(raw);
 
-    if (b.dataset.action === 'view'){
+    if (b.dataset.action === 'edit'){
       if (!raw || Number.isNaN(id) || !id){
         toast('ID do colaborador inválido.', 'err');
         return;
       }
 
-      const mod = await import('./modal.js');
-      mod.openPerfil(id);
+      if (!hasPerm(EDIT_PERM)) {
+        toast('Sem permissão para editar.', 'warn');
+        return;
+      }
+
+      const mod = await import('./modal.js?v=colab-direct-edit-20260810-1');
+      mod.openPerfil(id, { edit: true });
       return;
     }
 

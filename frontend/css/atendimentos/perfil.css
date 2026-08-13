@@ -906,6 +906,287 @@ html[data-theme="light"] .zcPerfil-selectWrap select option{
   color:rgba(255,255,255,.62);
 }
 
+
+.zcPerfilMediaModalFooter{
+  flex:0 0 auto;
+  min-height:58px;
+  padding:10px 18px 14px;
+  border-top:1px solid rgba(255,255,255,.08);
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+}
+
+.zcPerfilMediaModalStatus{
+  min-width:0;
+  font-size:12px;
+  color:rgba(255,255,255,.62);
+}
+
+.zcPerfilMediaLoadMore{
+  min-width:138px;
+  height:36px;
+  padding:0 14px;
+  border-radius:10px;
+  border:1px solid rgba(255,255,255,.10);
+  background:rgba(255,255,255,.05);
+  color:#eef3f6;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:8px;
+  font-size:12.5px;
+  font-weight:700;
+  cursor:pointer;
+}
+
+.zcPerfilMediaLoadMore:hover:not(:disabled){
+  background:rgba(255,255,255,.09);
+}
+
+.zcPerfilMediaLoadMore:disabled{
+  cursor:default;
+  opacity:.72;
+}
+
+.zcPerfilMediaLoadMoreSpinner,
+.zcPerfilMediaModalSpinner{
+  width:16px;
+  height:16px;
+  border-radius:999px;
+  border:2px solid rgba(255,255,255,.22);
+  border-top-color:currentColor;
+  animation:zcPerfilMediaSpin .72s linear infinite;
+}
+
+.zcPerfilMediaLoadMoreSpinner{
+  display:none;
+  width:14px;
+  height:14px;
+}
+
+.zcPerfilMediaLoadMore.is-loading .zcPerfilMediaLoadMoreSpinner{
+  display:inline-block;
+}
+
+@keyframes zcPerfilMediaSpin{
+  to{ transform:rotate(360deg); }
+}
+
+.zcPerfilMediaModalLoading,
+.zcPerfilMediaModalError{
+  grid-column:1 / -1;
+  min-height:240px;
+  border-radius:16px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  flex-direction:column;
+  gap:10px;
+  text-align:center;
+  color:rgba(255,255,255,.68);
+  border:1px dashed rgba(255,255,255,.10);
+}
+
+.zcPerfilMediaModalError i{
+  font-size:22px;
+}
+
+.zcPerfilMediaModalError strong{
+  color:#eef3f6;
+  font-size:13px;
+}
+
+.zcPerfilMediaModalError span{
+  max-width:480px;
+  font-size:12px;
+  line-height:1.45;
+}
+
+.zcPerfilMediaModalFile.is-link{
+  position:relative;
+  align-items:flex-start;
+}
+
+.zcPerfilMediaModalFile.is-link .zcPerfilMediaModalFileIco{
+  color:#dce8ff;
+}
+
+.zcPerfilMediaModalFile.is-link .zcPerfilMediaModalFileBody{
+  gap:3px;
+  padding-right:26px;
+}
+
+.zcPerfilMediaModalUrl{
+  color:#8fb8ff !important;
+}
+
+.zcPerfilMediaModalExcerpt{
+  margin-top:3px;
+  white-space:normal !important;
+  overflow:visible !important;
+  text-overflow:clip !important;
+  display:-webkit-box;
+  -webkit-line-clamp:2;
+  -webkit-box-orient:vertical;
+  overflow:hidden !important;
+}
+
+.zcPerfilMediaModalExternal{
+  position:absolute;
+  top:14px;
+  right:14px;
+  color:rgba(255,255,255,.48);
+  font-size:11px;
+}
+
+
+/* =========================
+   GALERIA — DARK OFICIAL ZAPSCHAT
+   Mantém a galeria na mesma paleta neutra dos demais modais.
+   ========================= */
+html.dark .zcPerfilMediaBackdrop,
+html[data-theme="dark"] .zcPerfilMediaBackdrop{
+  background:rgba(0,0,0,.56);
+}
+
+html.dark .zcPerfilMediaModal,
+html[data-theme="dark"] .zcPerfilMediaModal{
+  background:var(--zc-panel, #262626);
+  border-color:var(--zc-border-official, #383838);
+  box-shadow:0 26px 80px rgba(0,0,0,.35);
+}
+
+html.dark .zcPerfilMediaModalHead,
+html[data-theme="dark"] .zcPerfilMediaModalHead,
+html.dark .zcPerfilMediaModalFooter,
+html[data-theme="dark"] .zcPerfilMediaModalFooter{
+  border-color:var(--zc-border-official, #383838);
+}
+
+html.dark .zcPerfilMediaModalTitle span,
+html[data-theme="dark"] .zcPerfilMediaModalTitle span,
+html.dark .zcPerfilMediaModalFileBody strong,
+html[data-theme="dark"] .zcPerfilMediaModalFileBody strong,
+html.dark .zcPerfilMediaModalError strong,
+html[data-theme="dark"] .zcPerfilMediaModalError strong{
+  color:var(--zc-text-main, #ECECEC);
+}
+
+html.dark .zcPerfilMediaModalTitle small,
+html[data-theme="dark"] .zcPerfilMediaModalTitle small,
+html.dark .zcPerfilMediaModalStatus,
+html[data-theme="dark"] .zcPerfilMediaModalStatus,
+html.dark .zcPerfilMediaModalFileBody small,
+html[data-theme="dark"] .zcPerfilMediaModalFileBody small,
+html.dark .zcPerfilMediaModalLoading,
+html[data-theme="dark"] .zcPerfilMediaModalLoading,
+html.dark .zcPerfilMediaModalError,
+html[data-theme="dark"] .zcPerfilMediaModalError,
+html.dark .zcPerfilMediaModalEmpty,
+html[data-theme="dark"] .zcPerfilMediaModalEmpty{
+  color:var(--zc-text-secondary, #B4B4B4);
+}
+
+html.dark .zcPerfilMediaClose,
+html[data-theme="dark"] .zcPerfilMediaClose{
+  border-color:var(--zc-border-official, #383838);
+  background:var(--zc-card, #2A2A2A);
+  color:var(--zc-text-main, #ECECEC);
+}
+
+html.dark .zcPerfilMediaClose:hover,
+html[data-theme="dark"] .zcPerfilMediaClose:hover{
+  background:var(--zc-hover-bg, #303030);
+}
+
+html.dark .zcPerfilMediaTab,
+html[data-theme="dark"] .zcPerfilMediaTab{
+  border-color:var(--zc-border-official, #383838);
+  background:var(--zc-card, #2A2A2A);
+  color:var(--zc-text-main, #ECECEC);
+}
+
+html.dark .zcPerfilMediaTab:hover:not(.is-active),
+html[data-theme="dark"] .zcPerfilMediaTab:hover:not(.is-active){
+  background:var(--zc-hover-bg, #303030);
+}
+
+html.dark .zcPerfilMediaTab.is-active,
+html[data-theme="dark"] .zcPerfilMediaTab.is-active{
+  background:var(--zc-primary, #00A884);
+  border-color:var(--zc-primary, #00A884);
+  color:var(--zc-primary-contrast, #FFFFFF);
+}
+
+html.dark .zcPerfilMediaModalVisual,
+html[data-theme="dark"] .zcPerfilMediaModalVisual{
+  background:var(--zc-bg-main, #212121);
+  border-color:var(--zc-border-official, #383838);
+}
+
+html.dark .zcPerfilMediaModalCaption,
+html[data-theme="dark"] .zcPerfilMediaModalCaption{
+  color:var(--zc-text-main, #ECECEC);
+}
+
+html.dark .zcPerfilMediaModalFile,
+html[data-theme="dark"] .zcPerfilMediaModalFile{
+  background:var(--zc-card, #2A2A2A);
+  border-color:var(--zc-border-official, #383838);
+}
+
+html.dark .zcPerfilMediaModalFile:hover,
+html[data-theme="dark"] .zcPerfilMediaModalFile:hover{
+  background:var(--zc-hover-bg, #303030);
+}
+
+html.dark .zcPerfilMediaModalFileIco,
+html[data-theme="dark"] .zcPerfilMediaModalFileIco{
+  background:var(--zc-bg-main, #212121);
+  color:var(--zc-text-main, #ECECEC);
+}
+
+html.dark .zcPerfilMediaModalEmpty,
+html[data-theme="dark"] .zcPerfilMediaModalEmpty,
+html.dark .zcPerfilMediaModalLoading,
+html[data-theme="dark"] .zcPerfilMediaModalLoading,
+html.dark .zcPerfilMediaModalError,
+html[data-theme="dark"] .zcPerfilMediaModalError{
+  border-color:var(--zc-border-official, #383838);
+}
+
+html.dark .zcPerfilMediaLoadMore,
+html[data-theme="dark"] .zcPerfilMediaLoadMore{
+  border-color:var(--zc-border-official, #383838);
+  background:var(--zc-card, #2A2A2A);
+  color:var(--zc-text-main, #ECECEC);
+}
+
+html.dark .zcPerfilMediaLoadMore:hover:not(:disabled),
+html[data-theme="dark"] .zcPerfilMediaLoadMore:hover:not(:disabled){
+  background:var(--zc-hover-bg, #303030);
+}
+
+html.dark .zcPerfilMediaLoadMoreSpinner,
+html[data-theme="dark"] .zcPerfilMediaLoadMoreSpinner,
+html.dark .zcPerfilMediaModalSpinner,
+html[data-theme="dark"] .zcPerfilMediaModalSpinner{
+  border-color:rgba(236,236,236,.20);
+  border-top-color:currentColor;
+}
+
+html.dark .zcPerfilMediaModalUrl,
+html[data-theme="dark"] .zcPerfilMediaModalUrl{
+  color:var(--zc-primary-hover, #00BC96) !important;
+}
+
+html.dark .zcPerfilMediaModalExternal,
+html[data-theme="dark"] .zcPerfilMediaModalExternal{
+  color:var(--zc-text-disabled, #777777);
+}
+
 /* =========================
    TEMA LIGHT
    ========================= */
@@ -1055,6 +1336,49 @@ html[data-theme="light"] .zcPerfilBusinessList span{
   color:#6b7280;
 }
 
+
+html[data-theme="light"] .zcPerfilMediaModalFooter{
+  border-top-color:#e4eaee;
+}
+
+html[data-theme="light"] .zcPerfilMediaModalStatus{
+  color:#667783;
+}
+
+html[data-theme="light"] .zcPerfilMediaLoadMore{
+  border-color:#dfe5ea;
+  background:#f7f9fb;
+  color:#24333d;
+}
+
+html[data-theme="light"] .zcPerfilMediaLoadMore:hover:not(:disabled){
+  background:#eef2f5;
+}
+
+html[data-theme="light"] .zcPerfilMediaLoadMoreSpinner,
+html[data-theme="light"] .zcPerfilMediaModalSpinner{
+  border-color:rgba(36,51,61,.18);
+  border-top-color:currentColor;
+}
+
+html[data-theme="light"] .zcPerfilMediaModalLoading,
+html[data-theme="light"] .zcPerfilMediaModalError{
+  border-color:#d9e0e5;
+  color:#667783;
+}
+
+html[data-theme="light"] .zcPerfilMediaModalError strong{
+  color:#1b2934;
+}
+
+html[data-theme="light"] .zcPerfilMediaModalUrl{
+  color:#1f67c1 !important;
+}
+
+html[data-theme="light"] .zcPerfilMediaModalExternal{
+  color:#7a8994;
+}
+
 /* =========================
    RESPONSIVO
    ========================= */
@@ -1090,6 +1414,15 @@ html[data-theme="light"] .zcPerfilBusinessList span{
 
   .zcPerfilMediaModalGrid{
     grid-template-columns:repeat(2, minmax(0, 1fr));
+  }
+
+  .zcPerfilMediaModalFooter{
+    align-items:stretch;
+    flex-direction:column;
+  }
+
+  .zcPerfilMediaLoadMore{
+    width:100%;
   }
 }
 /* v12: garante que foto antiga do drawer nunca fique visível quando o avatar estiver oculto */

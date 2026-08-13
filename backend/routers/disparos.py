@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import os
+import re
 import time
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Set, Tuple
@@ -22,7 +24,6 @@ router = APIRouter(prefix="/api/disparos", tags=["Disparos"])
 
 EVOLUTION_URL = (os.getenv("EVOLUTION_URL") or "").rstrip("/")
 EVOLUTION_APIKEY = os.getenv("EVOLUTION_APIKEY") or os.getenv("EVOLUTION_API_KEY")
-N8N_IA_MELHORAR_DISPARO_URL = (os.getenv("N8N_IA_MELHORAR_DISPARO_URL") or "").strip()
 
 DISPAROS_MAX_DESTINATARIOS = max(1, int(os.getenv("DISPAROS_MAX_DESTINATARIOS", "5000")))
 DISPAROS_MAX_TENTATIVAS = max(1, min(5, int(os.getenv("DISPAROS_MAX_TENTATIVAS", "3"))))
@@ -267,6 +268,7 @@ class DisparoCreate(BaseModel):
     midia_id: Optional[int] = None
     numeros: List[str] = Field(default_factory=list)
     request_id: Optional[str] = Field(None, min_length=8, max_length=80)
+    variar_mensagem: bool = False
 
 
 class DisparoOut(BaseModel):
@@ -286,6 +288,7 @@ class DisparoOut(BaseModel):
     processados: int = 0
     progresso_pct: int = 0
     pode_cancelar: bool = False
+    variar_mensagem: bool = False
     colaborador_id: Optional[int] = None
     usuario_id: Optional[int] = None
     criado_por: Optional[str] = None
@@ -403,30 +406,97 @@ async def _evolution_send_text(
 
 
 # =====================================================
-# IA – chamada ao n8n
+# Variação inteligente local de mensagens
 # =====================================================
 
-async def _ia_melhorar_via_n8n(texto_msg: str):
-    if not N8N_IA_MELHORAR_DISPARO_URL:
-        raise HTTPException(status_code=500, detail="Motor de IA não configurado. Contate o administrador.")
+_VARIACAO_REGRAS = (
+    (r"\bOlá!\s*Tudo bem\?", ("Olá! Tudo bem?", "Oi! Tudo bem?", "Olá! Como vai?", "Oi! Espero que esteja tudo bem.")),
+    (r"\bPassando para\b", ("Passando para", "Estou passando para", "Estou entrando em contato para", "Quero falar com você para")),
+    (r"\bEstou passando para\b", ("Estou passando para", "Passando para", "Estou entrando em contato para", "Quero falar com você para")),
+    (r"\bSe quiser\b", ("Se quiser", "Se preferir", "Caso queira", "Se desejar")),
+    (r"\bpor aqui\b", ("por aqui", "aqui pelo WhatsApp", "por esta conversa", "por aqui mesmo")),
+    (r"\bte enviar\b", ("te enviar", "enviar para você", "te mandar", "mandar para você")),
+    (r"\bte passar\b", ("te passar", "passar para você", "te mandar", "enviar para você")),
+    (r"\bme responde\b", ("me responde", "pode me responder", "é só me responder", "fale comigo")),
+)
 
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(
-                N8N_IA_MELHORAR_DISPARO_URL,
-                headers={"Content-Type": "application/json"},
-                json={"draft": texto_msg},
-            )
-    except httpx.RequestError as exc:
-        raise HTTPException(status_code=502, detail="Erro ao chamar motor de IA (n8n).") from exc
+_VARIACAO_ABERTURAS = ("Olá!", "Oi!", "Olá, tudo bem?", "Oi, tudo bem?")
+_VARIACAO_FECHAMENTOS = (
+    "Se precisar, estou por aqui.",
+    "Qualquer dúvida, pode me chamar por aqui.",
+    "Se precisar de algo, é só me responder.",
+    "Fico à disposição por aqui.",
+)
 
-    try:
-        data = resp.json()
-    except Exception:
-        data = resp.text
-    if resp.status_code >= 400:
-        raise HTTPException(status_code=502, detail=f"n8n retornou erro HTTP {resp.status_code}.")
-    return data
+
+def _seed_index(seed: str, chave: str, tamanho: int) -> int:
+    if tamanho <= 1:
+        return 0
+    digest = hashlib.sha256(f"{seed}|{chave}".encode("utf-8", errors="ignore")).digest()
+    return int.from_bytes(digest[:8], "big") % tamanho
+
+
+def _limpar_texto_variacao(texto_msg: str) -> str:
+    linhas = []
+    for linha in str(texto_msg or "").replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        linhas.append(re.sub(r"[ \t]+", " ", linha).strip())
+    return "\n".join(linhas).strip()
+
+
+def _gerar_variacao_local(texto_msg: str, *, seed: str) -> str:
+    """Gera uma variação textual visível e conservadora sem serviço externo.
+
+    O seed torna a saída estável para cada destinatário, o que é importante
+    para retries: a mesma pessoa recebe a mesma versão da mensagem.
+    """
+    original = _limpar_texto_variacao(texto_msg)
+    if not original:
+        return ""
+
+    resultado = original
+    alteracoes = 0
+    for idx, (pattern, opcoes) in enumerate(_VARIACAO_REGRAS):
+        match = re.search(pattern, resultado, flags=re.IGNORECASE)
+        if not match:
+            continue
+        escolha = opcoes[_seed_index(seed, f"regra-{idx}", len(opcoes))]
+        if escolha.casefold() == match.group(0).casefold() and len(opcoes) > 1:
+            escolha = opcoes[(_seed_index(seed, f"regra-{idx}-alt", len(opcoes) - 1) + 1) % len(opcoes)]
+        novo = re.sub(pattern, escolha, resultado, count=1, flags=re.IGNORECASE)
+        if novo != resultado:
+            resultado = novo
+            alteracoes += 1
+        if alteracoes >= 3:
+            break
+
+    # Mensagens sem frases reconhecidas ainda recebem uma variação natural,
+    # sempre visível ao usuário e sem caracteres ocultos.
+    if alteracoes == 0:
+        modo = _seed_index(seed, "fallback-modo", 3)
+        lower = resultado.lstrip().casefold()
+        ja_tem_saudacao = lower.startswith(("olá", "ola", "oi", "bom dia", "boa tarde", "boa noite", "prezado", "prezada"))
+        if modo in (0, 1) and not ja_tem_saudacao:
+            abertura = _VARIACAO_ABERTURAS[_seed_index(seed, "abertura", len(_VARIACAO_ABERTURAS))]
+            resultado = f"{abertura} {resultado}"
+        else:
+            fechamento = _VARIACAO_FECHAMENTOS[_seed_index(seed, "fechamento", len(_VARIACAO_FECHAMENTOS))]
+            resultado = f"{resultado}\n\n{fechamento}"
+
+    resultado = resultado.strip()
+    return resultado if len(resultado) <= 4096 else original
+
+
+def _campanha_usa_variacao(disparo: models.Disparo) -> bool:
+    meta = disparo.meta if isinstance(disparo.meta, dict) else {}
+    return bool(meta.get("variar_mensagem"))
+
+
+def _mensagem_destinatario(disparo: models.Disparo, dest: models.DisparoDestinatario) -> str:
+    texto_msg = (disparo.mensagem or "").strip()
+    if not texto_msg or not _campanha_usa_variacao(disparo):
+        return texto_msg
+    seed = f"campanha:{disparo.id}|destinatario:{dest.id}|numero:{dest.numero_normalizado}"
+    return _gerar_variacao_local(texto_msg, seed=seed)
 
 
 # =====================================================
@@ -540,7 +610,7 @@ async def _enviar_destinatario(db: Session, disparo: models.Disparo, dest: model
     tipo = (disparo.tipo_conteudo or "text").lower()
     if tipo != "text":
         raise EvolutionSendError("Tipo de conteúdo não suportado neste disparo.")
-    texto_msg = (disparo.mensagem or "").strip()
+    texto_msg = _mensagem_destinatario(disparo, dest)
     if not texto_msg:
         raise EvolutionSendError("Mensagem vazia.")
 
@@ -861,6 +931,7 @@ def _disparo_out(
         processados=processados,
         progresso_pct=max(0, min(100, pct)),
         pode_cancelar=disparo.status in _ACTIVE_STATUSES,
+        variar_mensagem=_campanha_usa_variacao(disparo),
         colaborador_id=disparo.colaborador_id,
         usuario_id=disparo.usuario_id,
         criado_por=criado_por,
@@ -890,15 +961,10 @@ async def ia_melhorar_disparo(
     if not texto_msg:
         raise HTTPException(status_code=400, detail="Mensagem vazia.")
 
-    data = await _ia_melhorar_via_n8n(texto_msg)
-    melhorada = None
-    if isinstance(data, dict):
-        melhorada = data.get("melhorada") or data.get("mensagem") or data.get("text") or data.get("draft") or data.get("resultado")
-    elif isinstance(data, str):
-        melhorada = data
-    if not isinstance(melhorada, str) or not melhorada.strip():
-        melhorada = texto_msg
-    return IAMelhorarDisparoResp(original=texto_msg, melhorada=melhorada.strip())
+    variacao = body.get("variacao") if isinstance(body, dict) else None
+    seed = f"preview:{empresa_id}:{variacao if variacao is not None else time.time_ns()}"
+    melhorada = _gerar_variacao_local(texto_msg, seed=seed)
+    return IAMelhorarDisparoResp(original=texto_msg, melhorada=(melhorada or texto_msg).strip())
 
 
 @router.post("/simples", response_model=DisparoOut)
@@ -989,7 +1055,11 @@ async def criar_disparo_simples(
         enviados_sucesso=0,
         enviados_erro=0,
         status="pendente",
-        meta={"request_id": request_id} if request_id else None,
+        meta={
+            **({"request_id": request_id} if request_id else {}),
+            "variar_mensagem": bool(payload.variar_mensagem),
+            "motor_variacao": "local-v1" if payload.variar_mensagem else None,
+        },
     )
     db.add(disparo)
     db.flush()

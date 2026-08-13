@@ -176,19 +176,35 @@
   // 1) Tema (API simples para páginas/toggles)
   // =========================================================
   try {
-    var saved = localStorage.getItem('theme');
-    if (saved) {
-      document.documentElement.classList.toggle('dark', saved === 'dark');
-    } else {
+    var saved = localStorage.getItem('zapschat_theme');
+    if (saved !== 'dark' && saved !== 'light') {
+      var legacyTheme = localStorage.getItem('theme') || localStorage.getItem('valora_theme') || localStorage.getItem('zc:theme');
+      saved = legacyTheme === 'dark' || legacyTheme === 'light' ? legacyTheme : '';
+    }
+
+    if (!saved) {
       var prefersDark = window.matchMedia &&
         window.matchMedia('(prefers-color-scheme: dark)').matches;
-      document.documentElement.classList.toggle('dark', prefersDark);
+      saved = prefersDark ? 'dark' : 'light';
     }
+
+    function applyAppTheme(mode) {
+      var normalized = mode === 'dark' ? 'dark' : 'light';
+      try {
+        localStorage.setItem('zapschat_theme', normalized);
+        localStorage.setItem('theme', normalized);
+        localStorage.setItem('valora_theme', normalized);
+      } catch (e) {}
+      document.documentElement.classList.toggle('dark', normalized === 'dark');
+      document.documentElement.setAttribute('data-theme', normalized);
+      return normalized;
+    }
+
+    applyAppTheme(saved);
 
     window.AppTheme = {
       set: function(mode) {
-        try { localStorage.setItem('theme', mode); } catch (e) {}
-        document.documentElement.classList.toggle('dark', mode === 'dark');
+        return applyAppTheme(mode);
       },
       current: function() {
         return document.documentElement.classList.contains('dark') ? 'dark' : 'light';

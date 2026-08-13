@@ -1269,6 +1269,10 @@ def criar_cliente(
     db: Session = Depends(get_db),
     identity=Depends(get_current_identity),
 ):
+    # Cadastro manual de cliente deve respeitar clientes.criar em qualquer tela.
+    # `origem_atendimento` informa apenas de onde veio a ação; ele não concede
+    # permissão extra. A criação automática de contatos por mensagens recebidas
+    # acontece no fluxo interno do atendimento e não passa por este endpoint.
     pode_cadastrar_cliente = _has_any_perm(
         identity,
         "clientes.criar",
@@ -1276,21 +1280,11 @@ def criar_cliente(
         "admin",
         "root",
     )
-    pode_iniciar_atendimento = bool(body.origem_atendimento) and _has_any_perm(
-        identity,
-        "atendimento.enviar",
-        "atendimento.gerenciar",
-        "admin",
-        "root",
-    )
 
-    if not pode_cadastrar_cliente and not pode_iniciar_atendimento:
+    if not pode_cadastrar_cliente:
         raise HTTPException(
             status_code=403,
-            detail=(
-                "Sem permissão para criar clientes (clientes.criar) ou "
-                "iniciar uma conversa (atendimento.enviar)."
-            ),
+            detail="Sem permissão para criar clientes (clientes.criar).",
         )
 
     empresa = _get_empresa_or_404(db, empresa_id)

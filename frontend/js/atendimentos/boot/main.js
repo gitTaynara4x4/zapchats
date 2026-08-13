@@ -387,25 +387,25 @@
     await import('../ui/open-conversation-safe.js');
 
     await import('../ui/search.js');
-    await import('../ui/inst-switch.js?v=zc-inst-acl-v2-20260710');
+    await import('../ui/inst-switch.js?v=20260811-loading-feedback-v1');
     await import('../ui/filtros.js');
 
     // Recursos que voltaram: perfil, fotos, notas/IA e menu dos 3 pontinhos.
     // Mantemos fora apenas observers pesados/duplicados da lista.
-    await import('../ui/perfil.js');
+    await import('../ui/perfil.js?v=20260811-profile-gallery-v1');
     await import('../ui/perfil_quick.js');
     await importIfMissing('__ZC_PERFIL_INSTANCIA_LOADED__', '../ui/perfil-instancia.js');
-    await import('../ui/notes-drawer.js');
+    await import('../ui/notes-drawer.js?v=20260810-client-permissions-v1');
     await import('../ui/ia.js');
-    await import('../ui/new-chat.js?v=20260728-own-visibility-create-fix-1');
-    await import('../ui/context-menu.js');
+    await import('../ui/new-chat.js?v=20260811-loading-feedback-v1');
+    await import('../ui/context-menu.js?v=20260810-client-permissions-v1');
     await import('../ui/apagar.js');
 
     // A lista ativa fica com a versão corrigida, sem observer de class.
     await import('../ui/lista-active-sync.js');
     await import('../ui/avatar-lazy-safe.js');
 
-    await import('../ui/transferir-departamento.js?v=20260723-chatbot-actions-v1');
+    await import('../ui/transferir-departamento.js?v=20260811-loading-feedback-v1');
 
     // Header actions dividido: volta lupa/calendário/3 pontinhos sem reativar o loop.
     await import('../ui/header-actions/core.js');
@@ -417,19 +417,19 @@
     await import('../ui/header-actions/search.js');
     await import('../ui/header-actions/select-mode.js');
     await import('../ui/header-actions/forward.js');
-    await import('../ui/header-actions/menu.js?v=20260806-shared-participants-v1');
+    await import('../ui/header-actions/menu.js?v=20260810-client-permissions-v1');
     await import('../ui/header-actions/boot.js');
 
     // Editar nome do cliente: isolado, sem desligar 3 pontinhos/menu.
-    await import('../ui/editar-nome-cliente.js');
+    await import('../ui/editar-nome-cliente.js?v=20260810-client-permissions-v1');
 
     await import('../ui/message-actions.js');
-    await import('../ui/aceitar-conversa.js?v=20260806-shared-participants-v1');
+    await import('../ui/aceitar-conversa.js?v=20260811-operational-queue-v1');
     await import('../ui/message-selection.js');
     await import('../ui/forward-picker.js');
     await import('../ui/loading-guard.js');
 
-    return import('./init.js?v=20260726-clientes-deeplink-v1');
+    return import('./init.js?v=20260811-profile-gallery-v1');
   }
 
   async function importarModulos() {
@@ -462,9 +462,9 @@
     await import('../ui/media-render/core.js');
     await import('../ui/media-render/css.js');
     await import('../ui/media-render/urls.js');
-    await import('../ui/media-render/avatars.js');
+    await import('../ui/media-render/avatars.js?v=20260812-audio-avatar-exclusive-v2');
     await import('../ui/media-render/icons.js');
-    await import('../ui/media-render/audio.js');
+    await import('../ui/media-render/audio.js?v=20260812-audio-player-v2');
     await import('../ui/media-render/fallbacks.js');
     await import('../ui/media-render/markers.js');
     await import('../ui/media-render/gallery.js');
@@ -481,7 +481,7 @@
     /*
       Perfil da conversa / perfil rápido continuam no main.
     */
-    await import('../ui/perfil.js');
+    await import('../ui/perfil.js?v=20260811-profile-gallery-v1');
     await import('../ui/perfil_quick.js');
 
     /*
@@ -504,7 +504,7 @@
 
     // -------- UI DO ATENDIMENTO --------------------------------------
     await import('../ui/search.js');
-    await import('../ui/inst-switch.js?v=zc-inst-acl-v2-20260710');
+    await import('../ui/inst-switch.js?v=20260811-loading-feedback-v1');
 
     /*
       IMPORTANTE:
@@ -512,12 +512,12 @@
       ações usadas pelo menu dos 3 pontinhos.
       Sem eles, IA / Notas / alguns atalhos do menu podem parar.
     */
-    await import('../ui/notes-drawer.js');
+    await import('../ui/notes-drawer.js?v=20260810-client-permissions-v1');
     await import('../ui/ia.js');
     await import('../ui/filtros.js');
 
-    await import('../ui/context-menu.js');
-    await import('../ui/new-chat.js?v=20260728-own-visibility-create-fix-1');
+    await import('../ui/context-menu.js?v=20260810-client-permissions-v1');
+    await import('../ui/new-chat.js?v=20260811-loading-feedback-v1');
 
     /*
       Mantém a conversa aberta marcada na lista lateral.
@@ -534,7 +534,7 @@
       Transferência precisa vir ANTES do menu dos 3 pontinhos,
       porque o menu chama o botão original #btnTransferirDepartamento.
     */
-    await import('../ui/transferir-departamento.js?v=20260723-chatbot-actions-v1');
+    await import('../ui/transferir-departamento.js?v=20260811-loading-feedback-v1');
 
     /*
       Header actions dividido.
@@ -551,19 +551,19 @@
     await import('../ui/header-actions/search.js');
     await import('../ui/header-actions/select-mode.js');
     await import('../ui/header-actions/forward.js');
-    await import('../ui/header-actions/menu.js?v=20260806-shared-participants-v1');
+    await import('../ui/header-actions/menu.js?v=20260810-client-permissions-v1');
     await import('../ui/header-actions/boot.js');
 
     // Editar nome do cliente: isolado, sem desligar 3 pontinhos/menu.
-    await import('../ui/editar-nome-cliente.js');
+    await import('../ui/editar-nome-cliente.js?v=20260810-client-permissions-v1');
 
     await import('../ui/message-actions.js');
-    await import('../ui/aceitar-conversa.js?v=20260806-shared-participants-v1');
+    await import('../ui/aceitar-conversa.js?v=20260811-operational-queue-v1');
     await import('../ui/message-selection.js');
     await import('../ui/forward-picker.js');
 
     // -------- BOOT ----------------------------------------------------
-    return import('./init.js?v=20260726-clientes-deeplink-v1');
+    return import('./init.js?v=20260811-profile-gallery-v1');
   }
 
   async function start() {

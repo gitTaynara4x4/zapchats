@@ -502,6 +502,8 @@ def editar_nome_cliente_conversa(
     - funciona para atendente que tem acesso ao atendimento.
     """
     ensure_perm(identity, "atendimento.ver")
+    ensure_perm(identity, "clientes.ver")
+    ensure_perm(identity, "clientes.editar")
 
     empresa_id_req = _empresa_id_segura(identity, payload.empresa_id)
 

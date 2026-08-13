@@ -319,10 +319,23 @@
   <script>
     (function () {
       try {
-        const saved = localStorage.getItem('zc:theme');
-        const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
-        const mode = saved || (prefersDark ? 'dark' : 'light');
         const root = document.documentElement;
+        const canonical = localStorage.getItem('zapschat_theme');
+        const preferred = localStorage.getItem('zc:theme');
+        const legacy = localStorage.getItem('theme') || localStorage.getItem('valora_theme');
+        const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+
+        let mode = canonical;
+        if (mode !== 'dark' && mode !== 'light') {
+          if (preferred === 'system') mode = prefersDark ? 'dark' : 'light';
+          else if (preferred === 'dark' || preferred === 'light') mode = preferred;
+          else if (legacy === 'dark' || legacy === 'light') mode = legacy;
+          else mode = prefersDark ? 'dark' : 'light';
+        }
+
+        localStorage.setItem('zapschat_theme', mode);
+        localStorage.setItem('theme', mode);
+        localStorage.setItem('valora_theme', mode);
 
         root.setAttribute('data-theme', mode);
         root.classList.toggle('dark', mode === 'dark');
@@ -335,7 +348,7 @@
     src="https://unpkg.com/@lottiefiles/dotlottie-wc@0.6.2/dist/dotlottie-wc.js"
     type="module"></script>
 
-  <link rel="stylesheet" href="/frontend/css/atendimentos.css?v=20260726-no-contact-presence-v1">
+  <link rel="stylesheet" href="/frontend/css/atendimentos.css?v=20260812-audio-player-v2">
 
   <link
     rel="stylesheet"
@@ -720,7 +733,7 @@
     <!--
       Sidebar oficial do atendimento.
       Todo perfil/configurações/notificações/conta fica em:
-      /frontend/partials/sidebar-atendimentos.html
+      /frontend/partials/sidebar-atendimento/estrutura/sidebar-atendimento.html
 
       Importante:
       - Este slot é preenchido antes do main.js do atendimento iniciar.
@@ -965,7 +978,7 @@
       Boot ordenado do atendimento.
 
       Ordem correta:
-      1. Carrega /frontend/partials/sidebar-atendimentos.html
+      1. Carrega /frontend/partials/sidebar-atendimento/estrutura/sidebar-atendimento.html
       2. Executa scripts internos do sidebar
       3. Carrega os JS das páginas do painel:
          - settings-panel-pages.js
@@ -1000,7 +1013,7 @@
         }
       }
 
-      const SIDEBAR_URL = withBuild('/frontend/partials/sidebar-atendimentos.html');
+      const SIDEBAR_URL = withBuild('/frontend/partials/sidebar-atendimento/estrutura/sidebar-atendimento.html');
 
       const SETTINGS_JS = [
         '/frontend/js/atendimentos/ui/settings-panel-pages.js',
@@ -1014,7 +1027,7 @@
 
       const APP_JS = [
         {
-          src: '/frontend/js/atendimentos/boot/main.js',
+          src: '/frontend/js/atendimentos/boot/main.js?v=20260812-audio-avatar-exclusive-v2',
           type: 'module',
           key: 'main'
         },

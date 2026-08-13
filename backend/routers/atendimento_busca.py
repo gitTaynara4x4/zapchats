@@ -8,13 +8,13 @@ import unicodedata
 import requests
 import io
 import time
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 from typing import Any, Dict, List, Optional, Tuple
 from datetime import datetime, timezone
 
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from sqlalchemy import or_, func, text
+from sqlalchemy import or_, func, text, case
 from sqlalchemy.exc import ProgrammingError
 
 from backend.database import get_db
@@ -929,23 +929,23 @@ def _refresh_profile_for_grupo(
 # Mídias do perfil
 # =========================================================
 def _midia_categoria(row) -> str:
-    tipo = (getattr(row, "tipo", None) or "").strip().lower()
-    mime = (getattr(row, "mimetype", None) or "").strip().lower()
-    name = (
+    tipo = str(getattr(row, "tipo", None) or "").lower()
+    mime = str(getattr(row, "mimetype", None) or "").lower()
+    name = str(
         getattr(row, "nome_original", None)
         or getattr(row, "filename", None)
         or ""
-    ).strip().lower()
+    ).lower()
 
     blob = " ".join([tipo, mime, name])
 
-    if any(x in blob for x in ["image/", "imagem", "image", "foto", "jpeg", "jpg", "png", "webp", "gif"]):
+    if any(x in blob for x in ["image/", "imagem", "image", "foto", "jpeg", "jpg", "png", "webp", "gif", "sticker"]):
         return "imagem"
 
     if any(x in blob for x in ["video/", "vídeo", "video", "mp4", "mov", "avi", "mkv", "webm"]):
         return "video"
 
-    if any(x in blob for x in ["audio/", "áudio", "audio", "ptt", "ogg", "mp3", "wav", "m4a", "opus"]):
+    if any(x in blob for x in ["audio/", "áudio", "audio", "ptt", "ogg", "mp3", "wav", "m4a", "opus", "voice"]):
         return "audio"
 
     return "documento"
@@ -965,6 +965,8 @@ def _build_media_payload(m) -> Dict[str, Any]:
     categoria = _midia_categoria(m)
 
     mensagem = getattr(m, "mensagem", None)
+    if mensagem is None:
+        mensagem = getattr(m, "mensagem_grupo", None)
     raw_msg_id = getattr(mensagem, "msg_id", None) if mensagem is not None else None
 
     media_url = (
@@ -974,7 +976,9 @@ def _build_media_payload(m) -> Dict[str, Any]:
 
     return {
         "id": int(m.id),
+        "source": "midia",
         "mensagem_id": int(m.mensagem_id) if getattr(m, "mensagem_id", None) is not None else None,
+        "mensagem_grupo_id": int(m.mensagem_grupo_id) if getattr(m, "mensagem_grupo_id", None) is not None else None,
         "msg_id": raw_msg_id,
         "tipo": getattr(m, "tipo", None),
         "categoria": categoria,
@@ -991,11 +995,576 @@ def _build_media_payload(m) -> Dict[str, Any]:
     }
 
 
+# ---------------------------------------------------------------------
+# Galeria completa do perfil
+# ---------------------------------------------------------------------
+# O perfil continua trazendo somente uma prévia pequena (24 mídias) para
+# abrir rápido. Quando o usuário clica em "Ver tudo", estes helpers fazem
+# paginação real e também incluem links encontrados nas mensagens.
+_PROFILE_GALLERY_PAGE_DEFAULT = 24
+_PROFILE_GALLERY_PAGE_MAX = 60
+_PROFILE_LINK_REGEX = r'https?://[^[:space:]<>"]+'
+_PROFILE_GALLERY_FILTERS = {"all", "visual", "imagem", "video", "audio", "documento", "link"}
+
+
+def _gallery_filter(value: Optional[str]) -> str:
+    raw = str(value or "all").strip().lower()
+    return raw if raw in _PROFILE_GALLERY_FILTERS else "all"
+
+
+def _gallery_page_limit(value: int | None) -> int:
+    try:
+        n = int(value or _PROFILE_GALLERY_PAGE_DEFAULT)
+    except Exception:
+        n = _PROFILE_GALLERY_PAGE_DEFAULT
+    return max(1, min(n, _PROFILE_GALLERY_PAGE_MAX))
+
+
+def _gallery_offset(value: int | None) -> int:
+    try:
+        return max(0, int(value or 0))
+    except Exception:
+        return 0
+
+
+def _media_blob_sql():
+    return func.lower(
+        func.concat(
+            func.coalesce(models.Midia.tipo, ""), " ",
+            func.coalesce(models.Midia.mimetype, ""), " ",
+            func.coalesce(models.Midia.filename, ""), " ",
+            func.coalesce(models.Midia.nome_original, ""),
+        )
+    )
+
+
+def _media_category_conditions():
+    blob = _media_blob_sql()
+
+    imagem = or_(
+        blob.like("%image/%"), blob.like("%imagem%"), blob.like("%image%"),
+        blob.like("%foto%"), blob.like("%jpeg%"), blob.like("%jpg%"),
+        blob.like("%png%"), blob.like("%webp%"), blob.like("%gif%"),
+        blob.like("%sticker%"),
+    )
+    video = or_(
+        blob.like("%video/%"), blob.like("%vídeo%"), blob.like("%video%"),
+        blob.like("%mp4%"), blob.like("%mov%"), blob.like("%avi%"),
+        blob.like("%mkv%"), blob.like("%webm%"),
+    )
+    audio = or_(
+        blob.like("%audio/%"), blob.like("%áudio%"), blob.like("%audio%"),
+        blob.like("%ptt%"), blob.like("%ogg%"), blob.like("%mp3%"),
+        blob.like("%wav%"), blob.like("%m4a%"), blob.like("%opus%"),
+        blob.like("%voice%"),
+    )
+    documento = ~or_(imagem, video, audio)
+
+    return {
+        "imagem": imagem,
+        "video": video,
+        "audio": audio,
+        "documento": documento,
+        "visual": or_(imagem, video),
+    }
+
+
+def _media_summary_from_query(q_base) -> Dict[str, int]:
+    cond = _media_category_conditions()
+    row = q_base.with_entities(
+        func.count(models.Midia.id),
+        func.coalesce(func.sum(case((cond["imagem"], 1), else_=0)), 0),
+        func.coalesce(func.sum(case((cond["video"], 1), else_=0)), 0),
+        func.coalesce(func.sum(case((cond["audio"], 1), else_=0)), 0),
+    ).one()
+
+    total = int(row[0] or 0)
+    imagens = int(row[1] or 0)
+    videos = int(row[2] or 0)
+    audios = int(row[3] or 0)
+    documentos = max(0, total - imagens - videos - audios)
+
+    return {
+        "midias": total,
+        "imagens": imagens,
+        "videos": videos,
+        "audios": audios,
+        "documentos": documentos,
+        "fotos_videos": imagens + videos,
+    }
+
+
+def _clean_gallery_link(value: Any) -> str:
+    url = str(value or "").strip()
+    # Pontuação normalmente colada ao final da URL em uma frase.
+    while url and url[-1] in ".,;:!?)]}":
+        url = url[:-1]
+    return url
+
+
+def _gallery_link_title(url: str) -> str:
+    try:
+        host = (urlparse(url).netloc or "").strip().lower()
+        if host.startswith("www."):
+            host = host[4:]
+        return host or "Link"
+    except Exception:
+        return "Link"
+
+
+def _datetime_epoch(value: Any) -> float:
+    if value is None:
+        return 0.0
+    if isinstance(value, datetime):
+        dt = value
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        try:
+            return float(dt.timestamp())
+        except Exception:
+            return 0.0
+    try:
+        return float(value)
+    except Exception:
+        return 0.0
+
+
+def _group_timestamp_epoch(value: Any) -> float:
+    try:
+        n = float(value or 0)
+    except Exception:
+        return 0.0
+    # Evolution normalmente entrega epoch em ms; algumas bases antigas têm s.
+    if n > 100_000_000_000:
+        n /= 1000.0
+    return n
+
+
+def _group_timestamp_iso(value: Any) -> Optional[str]:
+    epoch = _group_timestamp_epoch(value)
+    if epoch <= 0:
+        return None
+    try:
+        return datetime.fromtimestamp(epoch, tz=timezone.utc).isoformat()
+    except Exception:
+        return None
+
+
+def _build_link_payload(*, message_id: int, msg_id: Any, url: Any, created_at: Any, conteudo: Any, ordinal: int = 1, group_timestamp: bool = False) -> Dict[str, Any]:
+    clean_url = _clean_gallery_link(url)
+    if group_timestamp:
+        sort_epoch = _group_timestamp_epoch(created_at)
+        created_iso = _group_timestamp_iso(created_at)
+    else:
+        sort_epoch = _datetime_epoch(created_at)
+        created_iso = created_at.isoformat() if isinstance(created_at, datetime) else None
+
+    excerpt = " ".join(str(conteudo or "").split())
+    if len(excerpt) > 180:
+        excerpt = excerpt[:177].rstrip() + "..."
+
+    return {
+        "id": f"link:{int(message_id)}:{int(ordinal or 1)}",
+        "source": "link",
+        "categoria": "link",
+        "tipo": "link",
+        "mensagem_id": int(message_id),
+        "msg_id": str(msg_id) if msg_id else None,
+        "url": clean_url,
+        "download_url": clean_url,
+        "title": _gallery_link_title(clean_url),
+        "excerpt": excerpt,
+        "created_at": created_iso,
+        "_sort_epoch": sort_epoch,
+        "_sort_id": int(message_id),
+    }
+
+
+def _query_cliente_links(db: Session, *, empresa_id: int, cliente_id: int, instancia_id: int | None = None, offset: int, limit: int) -> List[Dict[str, Any]]:
+    sql = text("""
+        SELECT
+            m.id AS message_id,
+            m.msg_id AS msg_id,
+            m.timestamp AS sort_ts,
+            m.conteudo AS conteudo,
+            (rx.matches)[1] AS url,
+            rx.ord AS link_ord
+        FROM mensagens AS m
+        CROSS JOIN LATERAL regexp_matches(
+            COALESCE(m.conteudo, ''),
+            :pattern,
+            'gi'
+        ) WITH ORDINALITY AS rx(matches, ord)
+        WHERE m.empresa_id = :empresa_id
+          AND m.cliente_id = :cliente_id
+          AND (:instancia_id IS NULL OR m.instancia_id = :instancia_id)
+          AND COALESCE(m.apagada_cliente, false) = false
+          AND COALESCE(m.apagada_usuario, false) = false
+        ORDER BY m.timestamp DESC NULLS LAST, m.id DESC, rx.ord DESC
+        OFFSET :offset
+        LIMIT :limit
+    """)
+    rows = db.execute(sql, {
+        "pattern": _PROFILE_LINK_REGEX,
+        "empresa_id": int(empresa_id),
+        "cliente_id": int(cliente_id),
+        "instancia_id": int(instancia_id) if instancia_id is not None else None,
+        "offset": int(offset),
+        "limit": int(limit),
+    }).mappings().all()
+
+    out: List[Dict[str, Any]] = []
+    for row in rows:
+        item = _build_link_payload(
+            message_id=int(row["message_id"]),
+            msg_id=row.get("msg_id"),
+            url=row.get("url"),
+            created_at=row.get("sort_ts"),
+            conteudo=row.get("conteudo"),
+            ordinal=int(row.get("link_ord") or 1),
+        )
+        if item["url"]:
+            out.append(item)
+    return out
+
+
+def _count_cliente_links(db: Session, *, empresa_id: int, cliente_id: int, instancia_id: int | None = None) -> int:
+    sql = text("""
+        SELECT COUNT(*) AS total
+        FROM mensagens AS m
+        CROSS JOIN LATERAL regexp_matches(
+            COALESCE(m.conteudo, ''),
+            :pattern,
+            'gi'
+        ) AS rx(matches)
+        WHERE m.empresa_id = :empresa_id
+          AND m.cliente_id = :cliente_id
+          AND (:instancia_id IS NULL OR m.instancia_id = :instancia_id)
+          AND COALESCE(m.apagada_cliente, false) = false
+          AND COALESCE(m.apagada_usuario, false) = false
+    """)
+    return int(db.execute(sql, {
+        "pattern": _PROFILE_LINK_REGEX,
+        "empresa_id": int(empresa_id),
+        "cliente_id": int(cliente_id),
+        "instancia_id": int(instancia_id) if instancia_id is not None else None,
+    }).scalar() or 0)
+
+
+def _query_grupo_links(db: Session, *, empresa_id: int, grupo_id: int, offset: int, limit: int) -> List[Dict[str, Any]]:
+    sql = text("""
+        SELECT
+            m.id AS message_id,
+            m.msg_id AS msg_id,
+            m.timestamp AS sort_ts,
+            m.conteudo AS conteudo,
+            (rx.matches)[1] AS url,
+            rx.ord AS link_ord
+        FROM mensagens_grupo AS m
+        CROSS JOIN LATERAL regexp_matches(
+            COALESCE(m.conteudo, ''),
+            :pattern,
+            'gi'
+        ) WITH ORDINALITY AS rx(matches, ord)
+        WHERE m.empresa_id = :empresa_id
+          AND m.grupo_id = :grupo_id
+          AND COALESCE(m.apagada_cliente, false) = false
+          AND COALESCE(m.apagada_usuario, false) = false
+        ORDER BY m.timestamp DESC NULLS LAST, m.id DESC, rx.ord DESC
+        OFFSET :offset
+        LIMIT :limit
+    """)
+    rows = db.execute(sql, {
+        "pattern": _PROFILE_LINK_REGEX,
+        "empresa_id": int(empresa_id),
+        "grupo_id": int(grupo_id),
+        "offset": int(offset),
+        "limit": int(limit),
+    }).mappings().all()
+
+    out: List[Dict[str, Any]] = []
+    for row in rows:
+        item = _build_link_payload(
+            message_id=int(row["message_id"]),
+            msg_id=row.get("msg_id"),
+            url=row.get("url"),
+            created_at=row.get("sort_ts"),
+            conteudo=row.get("conteudo"),
+            ordinal=int(row.get("link_ord") or 1),
+            group_timestamp=True,
+        )
+        if item["url"]:
+            out.append(item)
+    return out
+
+
+def _count_grupo_links(db: Session, *, empresa_id: int, grupo_id: int) -> int:
+    sql = text("""
+        SELECT COUNT(*) AS total
+        FROM mensagens_grupo AS m
+        CROSS JOIN LATERAL regexp_matches(
+            COALESCE(m.conteudo, ''),
+            :pattern,
+            'gi'
+        ) AS rx(matches)
+        WHERE m.empresa_id = :empresa_id
+          AND m.grupo_id = :grupo_id
+          AND COALESCE(m.apagada_cliente, false) = false
+          AND COALESCE(m.apagada_usuario, false) = false
+    """)
+    return int(db.execute(sql, {
+        "pattern": _PROFILE_LINK_REGEX,
+        "empresa_id": int(empresa_id),
+        "grupo_id": int(grupo_id),
+    }).scalar() or 0)
+
+
+def _media_payload_with_sort(row) -> Dict[str, Any]:
+    item = _build_media_payload(row)
+    item["_sort_epoch"] = _datetime_epoch(getattr(row, "created_at", None))
+    item["_sort_id"] = int(getattr(row, "id", 0) or 0)
+    return item
+
+
+def _strip_gallery_private_fields(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    for item in items:
+        item.pop("_sort_epoch", None)
+        item.pop("_sort_id", None)
+    return items
+
+
+def _gallery_counts_cliente(db: Session, *, empresa_id: int, cliente_id: int, instancia_id: int | None = None) -> Dict[str, int]:
+    q_base = db.query(models.Midia).filter(
+        models.Midia.empresa_id == int(empresa_id),
+        models.Midia.cliente_id == int(cliente_id),
+    )
+    if instancia_id is not None:
+        q_base = q_base.filter(models.Midia.instancia_id == int(instancia_id))
+    resumo = _media_summary_from_query(q_base)
+    links = _count_cliente_links(
+        db, empresa_id=empresa_id, cliente_id=cliente_id, instancia_id=instancia_id
+    )
+    resumo["links"] = links
+    resumo["total"] = int(resumo["midias"] + links)
+    return resumo
+
+
+def _gallery_counts_grupo(db: Session, *, empresa_id: int, grupo_id: int) -> Dict[str, int]:
+    msg_ids_q = db.query(models.MensagemGrupo.id).filter(
+        models.MensagemGrupo.empresa_id == int(empresa_id),
+        models.MensagemGrupo.grupo_id == int(grupo_id),
+    )
+    q_base = (
+        db.query(models.Midia)
+        .filter(models.Midia.empresa_id == int(empresa_id))
+        .filter(or_(
+            models.Midia.grupo_id == int(grupo_id),
+            models.Midia.mensagem_grupo_id.in_(msg_ids_q),
+        ))
+    )
+    resumo = _media_summary_from_query(q_base)
+    links = _count_grupo_links(db, empresa_id=empresa_id, grupo_id=grupo_id)
+    resumo["links"] = links
+    resumo["total"] = int(resumo["midias"] + links)
+    return resumo
+
+
+def _gallery_total_for_filter(counts: Dict[str, int], category: str) -> int:
+    if category == "all":
+        return int(counts.get("total", 0) or 0)
+    if category == "visual":
+        return int(counts.get("fotos_videos", 0) or 0)
+    if category == "imagem":
+        return int(counts.get("imagens", 0) or 0)
+    if category == "video":
+        return int(counts.get("videos", 0) or 0)
+    if category == "audio":
+        return int(counts.get("audios", 0) or 0)
+    if category == "documento":
+        return int(counts.get("documentos", 0) or 0)
+    if category == "link":
+        return int(counts.get("links", 0) or 0)
+    return 0
+
+
+def _query_media_page(q_base, *, category: str, offset: int, limit: int) -> List[Dict[str, Any]]:
+    if category not in {"all", "link"}:
+        cond = _media_category_conditions().get(category)
+        if cond is not None:
+            q_base = q_base.filter(cond)
+
+    rows = (
+        q_base
+        .order_by(models.Midia.created_at.desc().nullslast(), models.Midia.id.desc())
+        .offset(int(offset))
+        .limit(int(limit))
+        .all()
+    )
+    return [_media_payload_with_sort(row) for row in rows]
+
+
+def _build_gallery_page_cliente(
+    db: Session,
+    *,
+    empresa_id: int,
+    cliente_id: int,
+    instancia_id: int | None,
+    category: str,
+    offset: int,
+    limit: int,
+    include_counts: bool = False,
+) -> Dict[str, Any]:
+    """Monta uma página sem fazer COUNT completo por padrão.
+
+    O endpoint antigo recalculava todas as mídias + todos os links antes de
+    devolver a primeira página. Em históricos grandes isso podia ultrapassar o
+    timeout do Atendimento mesmo quando a página tinha poucos itens. A navegação
+    não precisa do total exato para funcionar: limit + 1 já informa se há mais.
+    """
+    take = int(limit) + 1
+
+    q_base = db.query(models.Midia).filter(
+        models.Midia.empresa_id == int(empresa_id),
+        models.Midia.cliente_id == int(cliente_id),
+    )
+    if instancia_id is not None:
+        q_base = q_base.filter(models.Midia.instancia_id == int(instancia_id))
+
+    source_has_more = False
+    if category == "link":
+        page = _query_cliente_links(
+            db, empresa_id=empresa_id, cliente_id=cliente_id, instancia_id=instancia_id,
+            offset=offset, limit=take,
+        )
+    elif category == "all":
+        # Busca só o necessário em cada fonte. Um item extra por fonte permite
+        # saber se ainda existe histórico sem executar COUNT/regexp global.
+        source_take = int(offset) + take
+        media_probe = _query_media_page(q_base, category="all", offset=0, limit=source_take + 1)
+        links_probe = _query_cliente_links(
+            db, empresa_id=empresa_id, cliente_id=cliente_id, instancia_id=instancia_id,
+            offset=0, limit=source_take + 1,
+        )
+        source_has_more = len(media_probe) > source_take or len(links_probe) > source_take
+        media = media_probe[:source_take]
+        links = links_probe[:source_take]
+        merged = media + links
+        merged.sort(
+            key=lambda item: (float(item.get("_sort_epoch") or 0), int(item.get("_sort_id") or 0)),
+            reverse=True,
+        )
+        page = merged[int(offset): int(offset) + take]
+    else:
+        page = _query_media_page(q_base, category=category, offset=offset, limit=take)
+
+    has_more = bool(len(page) > limit or source_has_more)
+    items = page[:limit]
+    _strip_gallery_private_fields(items)
+
+    counts = None
+    total = None
+    if include_counts:
+        counts = _gallery_counts_cliente(
+            db, empresa_id=empresa_id, cliente_id=cliente_id, instancia_id=instancia_id
+        )
+        total = _gallery_total_for_filter(counts, category)
+    elif not has_more:
+        # Quando chegamos ao fim, o total passa a ser conhecido sem COUNT.
+        total = int(offset) + len(items)
+
+    return {
+        "items": items,
+        "categoria": category,
+        "offset": int(offset),
+        "limit": int(limit),
+        "next_offset": int(offset) + len(items),
+        "has_more": has_more,
+        "total": int(total) if total is not None else None,
+        "counts": counts,
+    }
+
+
+def _build_gallery_page_grupo(
+    db: Session,
+    *,
+    empresa_id: int,
+    grupo_id: int,
+    category: str,
+    offset: int,
+    limit: int,
+    include_counts: bool = False,
+) -> Dict[str, Any]:
+    # Mesmo princípio do cliente: pagina primeiro; COUNT completo só quando pedido.
+    take = int(limit) + 1
+
+    msg_ids_q = db.query(models.MensagemGrupo.id).filter(
+        models.MensagemGrupo.empresa_id == int(empresa_id),
+        models.MensagemGrupo.grupo_id == int(grupo_id),
+    )
+    q_base = (
+        db.query(models.Midia)
+        .filter(models.Midia.empresa_id == int(empresa_id))
+        .filter(or_(
+            models.Midia.grupo_id == int(grupo_id),
+            models.Midia.mensagem_grupo_id.in_(msg_ids_q),
+        ))
+    )
+
+    source_has_more = False
+    if category == "link":
+        page = _query_grupo_links(
+            db, empresa_id=empresa_id, grupo_id=grupo_id,
+            offset=offset, limit=take,
+        )
+    elif category == "all":
+        source_take = int(offset) + take
+        media_probe = _query_media_page(q_base, category="all", offset=0, limit=source_take + 1)
+        links_probe = _query_grupo_links(
+            db, empresa_id=empresa_id, grupo_id=grupo_id,
+            offset=0, limit=source_take + 1,
+        )
+        source_has_more = len(media_probe) > source_take or len(links_probe) > source_take
+        media = media_probe[:source_take]
+        links = links_probe[:source_take]
+        merged = media + links
+        merged.sort(
+            key=lambda item: (float(item.get("_sort_epoch") or 0), int(item.get("_sort_id") or 0)),
+            reverse=True,
+        )
+        page = merged[int(offset): int(offset) + take]
+    else:
+        page = _query_media_page(q_base, category=category, offset=offset, limit=take)
+
+    has_more = bool(len(page) > limit or source_has_more)
+    items = page[:limit]
+    _strip_gallery_private_fields(items)
+
+    counts = None
+    total = None
+    if include_counts:
+        counts = _gallery_counts_grupo(db, empresa_id=empresa_id, grupo_id=grupo_id)
+        total = _gallery_total_for_filter(counts, category)
+    elif not has_more:
+        total = int(offset) + len(items)
+
+    return {
+        "items": items,
+        "categoria": category,
+        "offset": int(offset),
+        "limit": int(limit),
+        "next_offset": int(offset) + len(items),
+        "has_more": has_more,
+        "total": int(total) if total is not None else None,
+        "counts": counts,
+    }
+
+
 def _build_midias_for_cliente(
     db: Session,
     *,
     empresa_id: int,
     cliente_id: int,
+    instancia_id: int | None = None,
     recent_limit: int = 24,
 ) -> tuple[Dict[str, int], List[Dict[str, Any]]]:
     q_base = (
@@ -1006,53 +1575,21 @@ def _build_midias_for_cliente(
         )
     )
 
-    total = q_base.count()
+    if instancia_id is not None:
+        q_base = q_base.filter(models.Midia.instancia_id == int(instancia_id))
 
-    imagens = 0
-    videos = 0
-    audios = 0
-    documentos = 0
-
-    all_rows = (
-        q_base
-        .order_by(models.Midia.created_at.desc().nullslast(), models.Midia.id.desc())
-        .all()
+    resumo = _gallery_counts_cliente(
+        db, empresa_id=empresa_id, cliente_id=cliente_id, instancia_id=instancia_id
     )
 
-    for row in all_rows:
-        cat = _midia_categoria(row)
-        if cat == "imagem":
-            imagens += 1
-        elif cat == "video":
-            videos += 1
-        elif cat == "audio":
-            audios += 1
-        else:
-            documentos += 1
-
     recent_rows = (
-        db.query(models.Midia)
-        .filter(
-            models.Midia.empresa_id == int(empresa_id),
-            models.Midia.cliente_id == int(cliente_id),
-        )
+        q_base
         .order_by(models.Midia.created_at.desc().nullslast(), models.Midia.id.desc())
         .limit(int(recent_limit))
         .all()
     )
-
     recentes = [_build_media_payload(row) for row in recent_rows]
-
-    resumo = {
-        "total": int(total or 0),
-        "imagens": int(imagens or 0),
-        "videos": int(videos or 0),
-        "audios": int(audios or 0),
-        "documentos": int(documentos or 0),
-    }
-
     return resumo, recentes
-
 
 
 def _build_midias_for_grupo(
@@ -1081,29 +1618,7 @@ def _build_midias_for_grupo(
         )
     )
 
-    total = q_base.count()
-
-    imagens = 0
-    videos = 0
-    audios = 0
-    documentos = 0
-
-    all_rows = (
-        q_base
-        .order_by(models.Midia.created_at.desc().nullslast(), models.Midia.id.desc())
-        .all()
-    )
-
-    for row in all_rows:
-        cat = _midia_categoria(row)
-        if cat == "imagem":
-            imagens += 1
-        elif cat == "video":
-            videos += 1
-        elif cat == "audio":
-            audios += 1
-        else:
-            documentos += 1
+    resumo = _gallery_counts_grupo(db, empresa_id=empresa_id, grupo_id=grupo_id)
 
     recent_rows = (
         q_base
@@ -1111,17 +1626,7 @@ def _build_midias_for_grupo(
         .limit(int(recent_limit))
         .all()
     )
-
     recentes = [_build_media_payload(row) for row in recent_rows]
-
-    resumo = {
-        "total": int(total or 0),
-        "imagens": int(imagens or 0),
-        "videos": int(videos or 0),
-        "audios": int(audios or 0),
-        "documentos": int(documentos or 0),
-    }
-
     return resumo, recentes
 
 
@@ -1237,10 +1742,15 @@ def _build_profile_payload(db: Session, cli, atd) -> Dict[str, Any]:
             "website": getattr(cli, "website", None),
         }
 
+    profile_instancia_id = _to_int(getattr(atd, "instancia_id", None)) if atd is not None else None
+    if profile_instancia_id is None:
+        profile_instancia_id = _to_int(getattr(cli, "instancia_id", None))
+
     midias_resumo, midias_recentes = _build_midias_for_cliente(
         db,
         empresa_id=int(cli.empresa_id),
         cliente_id=int(cli.id),
+        instancia_id=profile_instancia_id,
         recent_limit=24,
     )
 
@@ -2264,7 +2774,7 @@ def atendimento_avatar(
     # =====================================================
     # CLIENTE
     # =====================================================
-    cli, _atd = assert_cliente_access(
+    cli, atd = assert_cliente_access(
         db,
         identity=identity,
         empresa_id=int(empresa_id_eff),
@@ -2330,6 +2840,7 @@ def get_cliente_profile(
     identity=Depends(get_current_identity),
 ):
     ensure_perm(identity, "atendimento.ver")
+    ensure_perm(identity, "clientes.ver")
 
     empresa_id_eff = assert_same_company(identity, empresa_id)
 
@@ -2345,6 +2856,50 @@ def get_cliente_profile(
     return _build_profile_payload(db, cli, atd)
 
 
+@router.get("/atendimento/clientes/{cliente_id}/profile/media")
+def get_cliente_profile_media(
+    cliente_id: int,
+    empresa_id: int | None = Query(None),
+    instancia_id: int | None = Query(None),
+    categoria: str = Query("all"),
+    offset: int = Query(0, ge=0),
+    limit: int = Query(_PROFILE_GALLERY_PAGE_DEFAULT, ge=1, le=_PROFILE_GALLERY_PAGE_MAX),
+    contar: bool = Query(False),
+    db: Session = Depends(get_db),
+    identity=Depends(get_current_identity),
+):
+    """Galeria completa e paginada do cliente: mídias, documentos e links."""
+    ensure_perm(identity, "atendimento.ver")
+    ensure_perm(identity, "clientes.ver")
+
+    empresa_id_eff = assert_same_company(identity, empresa_id)
+    cli, atd = assert_cliente_access(
+        db,
+        identity=identity,
+        empresa_id=empresa_id_eff,
+        cliente_id=int(cliente_id),
+        instancia_id=instancia_id,
+        allow_unassigned_department=True,
+    )
+
+    gallery_instancia_id = _to_int(instancia_id)
+    if gallery_instancia_id is None and atd is not None:
+        gallery_instancia_id = _to_int(getattr(atd, "instancia_id", None))
+    if gallery_instancia_id is None:
+        gallery_instancia_id = _to_int(getattr(cli, "instancia_id", None))
+
+    return _build_gallery_page_cliente(
+        db,
+        empresa_id=int(empresa_id_eff),
+        cliente_id=int(cli.id),
+        instancia_id=gallery_instancia_id,
+        category=_gallery_filter(categoria),
+        offset=_gallery_offset(offset),
+        limit=_gallery_page_limit(limit),
+        include_counts=bool(contar),
+    )
+
+
 @router.post("/atendimento/clientes/{cliente_id}/profile/refresh")
 def refresh_cliente_profile(
     cliente_id: int,
@@ -2354,6 +2909,7 @@ def refresh_cliente_profile(
     identity=Depends(get_current_identity),
 ):
     ensure_perm(identity, "atendimento.ver")
+    ensure_perm(identity, "clientes.ver")
 
     if not EVOLUTION_URL:
         raise HTTPException(500, "EVOLUTION_URL não configurada no servidor.")
@@ -2403,6 +2959,8 @@ def merge_cliente_profile(
     identity=Depends(get_current_identity),
 ):
     ensure_perm(identity, "atendimento.ver")
+    ensure_perm(identity, "clientes.ver")
+    ensure_perm(identity, "clientes.editar")
 
     empresa_id_eff = assert_same_company(identity, empresa_id)
 
@@ -2475,6 +3033,38 @@ def get_grupo_profile(
     )
 
     return _build_group_profile_payload(db, grp)
+
+
+@router.get("/atendimento/grupos/{grupo_id}/profile/media")
+def get_grupo_profile_media(
+    grupo_id: int,
+    empresa_id: int | None = Query(None),
+    categoria: str = Query("all"),
+    offset: int = Query(0, ge=0),
+    limit: int = Query(_PROFILE_GALLERY_PAGE_DEFAULT, ge=1, le=_PROFILE_GALLERY_PAGE_MAX),
+    contar: bool = Query(False),
+    db: Session = Depends(get_db),
+    identity=Depends(get_current_identity),
+):
+    """Galeria completa e paginada do grupo: mídias, documentos e links."""
+    ensure_perm(identity, "atendimento.ver")
+    empresa_id_eff = assert_same_company(identity, empresa_id)
+    grp, _allowed = _assert_grupo_profile_access(
+        db,
+        identity=identity,
+        empresa_id=int(empresa_id_eff),
+        grupo_id=int(grupo_id),
+    )
+
+    return _build_gallery_page_grupo(
+        db,
+        empresa_id=int(empresa_id_eff),
+        grupo_id=int(grp.id),
+        category=_gallery_filter(categoria),
+        offset=_gallery_offset(offset),
+        limit=_gallery_page_limit(limit),
+        include_counts=bool(contar),
+    )
 
 
 @router.post("/atendimento/grupos/{grupo_id}/profile/refresh")
@@ -2582,6 +3172,7 @@ def cliente_get(
     identity=Depends(get_current_identity),
 ):
     ensure_perm(identity, "atendimento.ver")
+    ensure_perm(identity, "clientes.ver")
 
     empresa_id_eff = assert_same_company(identity, empresa_id)
 
@@ -2623,6 +3214,8 @@ def cliente_put(
     identity=Depends(get_current_identity),
 ):
     ensure_perm(identity, "atendimento.ver")
+    ensure_perm(identity, "clientes.ver")
+    ensure_perm(identity, "clientes.editar")
 
     empresa_id_eff = assert_same_company(identity, empresa_id)
 

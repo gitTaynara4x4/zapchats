@@ -17,7 +17,10 @@ from sqlalchemy import text, or_
 
 from backend.database import get_db
 from backend import models
-from backend.services.chatbot_claim_policy import department_claim_required
+from backend.services.chatbot_claim_policy import (
+    department_claim_required,
+    department_chatbot_active_for_department,
+)
 from backend.websocket_manager import conexoes_ativas
 from backend.routers.auth import get_current_identity
 
@@ -203,6 +206,22 @@ def _atendimento_exige_aceite(
 
     fila_id = _to_int(getattr(atendimento, "fila_id", None))
     if fila_id is None:
+        return False
+
+    empresa_id = _to_int(getattr(atendimento, "empresa_id", None))
+    instancia_id = _to_int(getattr(atendimento, "instancia_id", None))
+    departamento_id = _to_int(getattr(atendimento, "departamento_id", None))
+    if (
+        empresa_id is None
+        or instancia_id is None
+        or departamento_id is None
+        or not department_chatbot_active_for_department(
+            db,
+            empresa_id=int(empresa_id),
+            instancia_id=int(instancia_id),
+            departamento_id=int(departamento_id),
+        )
+    ):
         return False
 
     if not _fila_feature_enabled(db):

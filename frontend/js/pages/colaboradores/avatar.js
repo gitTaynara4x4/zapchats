@@ -53,6 +53,29 @@ function realAvatarURL(url){
   return s && !isGeneratedInitialAvatarURL(s) ? s : null;
 }
 
+function avatarCandidates(colab){
+  if (!colab || typeof colab !== 'object') return [];
+
+  const raw = [
+    colab.avatar_url,
+    colab.foto_url,
+    colab.photo_url,
+    colab.profile_picture_url,
+    colab.profilePictureUrl,
+    colab.picture,
+    colab.avatar_remote_url,
+    colab.foto,
+    colab.avatar
+  ];
+
+  const out = [];
+  for (const value of raw){
+    const url = realAvatarURL(value);
+    if (url && !out.includes(url)) out.push(url);
+  }
+  return out;
+}
+
 async function fetchAvatarAsBlobURL(url){
   try {
     const r = await authFetch(withEmpresa(url));
@@ -68,9 +91,9 @@ async function fetchAvatarAsBlobURL(url){
 
 export async function fetchAvatarThumbURLFor(colab){
   const id = Number(colab?.id || 0) || 0;
-  const directURL = realAvatarURL(colab?.avatar_url);
+  const candidates = avatarCandidates(colab);
 
-  if (!id) return directURL;
+  if (!id) return candidates[0] || null;
 
   if (state.avatarThumbCache.has(id)) {
     return state.avatarThumbCache.get(id);
@@ -83,30 +106,35 @@ export async function fetchAvatarThumbURLFor(colab){
   const p = (async () => {
     let url = null;
 
-    // Se o backend mandou um avatar gerado externo, usa direto.
-    // Assim evitamos chamar /avatar para todo colaborador e encher o console com 404.
-    if (directURL && !shouldFetchAvatarURL(directURL)) {
-      url = directURL;
+    // 1) URL real enviada pela API. Endpoints internos protegidos viram blob;
+    // URLs externas podem ser usadas diretamente pelo <img>.
+    for (const candidate of candidates){
+      if (shouldFetchAvatarURL(candidate)) {
+        url = await fetchAvatarAsBlobURL(candidate);
+      } else {
+        url = candidate;
+      }
+      if (url) break;
     }
 
-    // Se o backend mandou /api/.../avatar, aí sim busca como blob autenticado.
-    if (!url && directURL && shouldFetchAvatarURL(directURL)) {
-      url = await fetchAvatarAsBlobURL(directURL);
+    // 2) Compatibilidade: mesmo que a listagem esteja desatualizada ou tenha
+    // devolvido apenas avatar de iniciais, tenta a foto real do colaborador.
+    if (!url) {
+      url = await fetchAvatarAsBlobURL(`/api/colaboradores/${id}/avatar`);
     }
 
+    // 3) Cadastros antigos podem ter a foto gravada somente no usuário.
     if (!url && colab?.usuario_id){
       url = await fetchAvatarAsBlobURL(`/api/usuarios/${colab.usuario_id}/avatar`);
     }
 
     state.avatarThumbCache.set(id, url || null);
-
     return url || null;
   })().finally(() => {
     state.avatarThumbInflight.delete(id);
   });
 
   state.avatarThumbInflight.set(id, p);
-
   return p;
 }
 
@@ -207,23 +235,23 @@ export async function fetchAvatarURLFor(colab){
     return colab ? realAvatarURL(colab.avatar_url) : null;
   }
 
-  const directURL = realAvatarURL(colab.avatar_url);
+  const candidates = avatarCandidates(colab);
 
-  if (directURL && !shouldFetchAvatarURL(directURL)) {
-    return directURL;
-  }
-
-  if (directURL && shouldFetchAvatarURL(directURL)) {
+  for (const directURL of candidates){
+    if (!shouldFetchAvatarURL(directURL)) return directURL;
     const got = await fetchAvatarAsBlobURL(directURL);
     if (got) return got;
   }
+
+  const ownAvatar = await fetchAvatarAsBlobURL(`/api/colaboradores/${colab.id}/avatar`);
+  if (ownAvatar) return ownAvatar;
 
   if (colab.usuario_id){
     const got = await fetchAvatarAsBlobURL(`/api/usuarios/${colab.usuario_id}/avatar`);
     if (got) return got;
   }
 
-  return directURL || null;
+  return null;
 }
 
 function convertToPng(file){

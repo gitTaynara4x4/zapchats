@@ -13,6 +13,10 @@ from sqlalchemy.orm import Session, selectinload
 from backend import models
 from backend.database import get_db
 from backend.services.atendimento_claim_state import set_waiting_department
+from backend.services.fila_atendimento_runtime import (
+    chatbot_queue_context,
+    validate_queue_chatbot_scope,
+)
 from backend.routers.auth import get_current_identity
 from backend.security.atendimento_acl import (
     assert_same_company,
@@ -440,6 +444,8 @@ def _fila_payload(fila: models.FilaAtendimento) -> Dict[str, Any]:
         "exigir_aceite": bool(fila.exigir_aceite),
         "retorno_ao_liberar": bool(fila.retorno_ao_liberar),
         "auto_distribuir": bool(fila.auto_distribuir),
+        "retorno_inatividade_ativo": bool(getattr(fila, "retorno_inatividade_ativo", False)),
+        "retorno_inatividade_minutos": getattr(fila, "retorno_inatividade_minutos", None),
 
         "instancias": instancias,
         "instancia_ids": [int(x["id"]) for x in instancias],
@@ -460,6 +466,8 @@ def _fila_publica_payload(fila: models.FilaAtendimento) -> Dict[str, Any]:
         "mensagem_padrao": fila.mensagem_padrao,
         "departamento_id": int(fila.departamento_id) if fila.departamento_id is not None else None,
         "ordem": int(fila.ordem or 0),
+        "retorno_inatividade_ativo": bool(getattr(fila, "retorno_inatividade_ativo", False)),
+        "retorno_inatividade_minutos": getattr(fila, "retorno_inatividade_minutos", None),
     }
 
 
@@ -487,6 +495,8 @@ class FilaCreateIn(BaseModel):
     exigir_aceite: bool = True
     retorno_ao_liberar: bool = True
     auto_distribuir: bool = False
+    retorno_inatividade_ativo: bool = True
+    retorno_inatividade_minutos: Optional[int] = Field(5, ge=1, le=1440)
 
 
 class FilaUpdateIn(BaseModel):
@@ -510,6 +520,8 @@ class FilaUpdateIn(BaseModel):
     exigir_aceite: Optional[bool] = None
     retorno_ao_liberar: Optional[bool] = None
     auto_distribuir: Optional[bool] = None
+    retorno_inatividade_ativo: Optional[bool] = None
+    retorno_inatividade_minutos: Optional[int] = Field(None, ge=1, le=1440)
 
 
 class EscolherFilaIn(BaseModel):
@@ -517,6 +529,45 @@ class EscolherFilaIn(BaseModel):
     cliente_id: int
     instancia_id: Optional[int] = None
     fila_id: int
+
+
+def _assert_sem_fila_ativa_conflitante(
+    db: Session,
+    *,
+    empresa_id: int,
+    departamento_id: int,
+    instancia_ids: List[int],
+    exclude_fila_id: Optional[int] = None,
+) -> None:
+    """Uma instância/departamento possui uma única fila operacional ativa."""
+    ids = sorted({int(x) for x in instancia_ids or []})
+    if not ids:
+        return
+
+    q = (
+        db.query(models.FilaAtendimento.id, models.FilaAtendimento.nome, models.FilaInstancia.instancia_id)
+        .join(models.FilaInstancia, models.FilaInstancia.fila_id == models.FilaAtendimento.id)
+        .filter(
+            models.FilaAtendimento.empresa_id == int(empresa_id),
+            models.FilaAtendimento.departamento_id == int(departamento_id),
+            models.FilaAtendimento.ativa.is_(True),
+            models.FilaInstancia.empresa_id == int(empresa_id),
+            models.FilaInstancia.instancia_id.in_(ids),
+        )
+    )
+    if exclude_fila_id is not None:
+        q = q.filter(models.FilaAtendimento.id != int(exclude_fila_id))
+
+    conflict = q.first()
+    if conflict:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f'Já existe uma fila ativa para este departamento no WhatsApp selecionado: '
+                f'{getattr(conflict, "nome", None) or "fila existente"}. '
+                'Edite essa fila ou desative-a antes de criar outra.'
+            ),
+        )
 
 
 # =========================================================
@@ -531,10 +582,10 @@ def aplicar_escolha_fila_cliente(
     instancia_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
-    Esta função é a regra central.
+    Helper legado mantido por compatibilidade de API.
 
-    O cliente escolheu uma fila no chatbot.
-    Então:
+    No fluxo atual o cliente escolhe o DEPARTAMENTO no Chatbot e a fila é
+    vinculada automaticamente pelo backend. Se este helper for chamado:
     - NÃO marca fila no Cliente.
     - Marca fila no Atendimento aberto.
     - Se não existir atendimento aberto, cria um.
@@ -593,6 +644,16 @@ def aplicar_escolha_fila_cliente(
 
     if not bool(fila.ativa):
         raise HTTPException(status_code=409, detail="Esta fila está inativa.")
+
+    try:
+        validate_queue_chatbot_scope(
+            db,
+            empresa_id=empresa_id,
+            departamento_id=getattr(fila, "departamento_id", None),
+            instancia_ids=[int(instancia_id_eff)],
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
 
     if not _fila_permitida_na_instancia(
         db,
@@ -662,6 +723,24 @@ def aplicar_escolha_fila_cliente(
 # =========================================================
 # Rotas
 # =========================================================
+@router.get("/filas/contexto")
+def contexto_filas(
+    empresa_id: Optional[int] = Query(None),
+    db: Session = Depends(get_db),
+    identity=Depends(get_current_identity),
+):
+    _ensure_any_perm(
+        identity,
+        "atendimento.ver",
+        "atendimento.gerenciar",
+        "chatbot.configurar",
+        "departamentos.gerenciar",
+    )
+    empresa_id_eff = assert_same_company(identity, empresa_id)
+    ctx = chatbot_queue_context(db, empresa_id=int(empresa_id_eff))
+    return {"ok": True, **ctx}
+
+
 @router.get("/filas")
 def listar_filas(
     empresa_id: Optional[int] = Query(None),
@@ -740,6 +819,23 @@ def listar_filas(
             )
         ]
 
+    # Não exibe fila cujo Chatbot/departamento esteja desligado. A configuração
+    # permanece salva para reaparecer se o fluxo for reativado depois.
+    ctx = chatbot_queue_context(db, empresa_id=int(empresa_id_eff))
+    valid_scope = {
+        (int(dep["id"]), int(iid))
+        for dep in ctx.get("departments", [])
+        for iid in dep.get("instancia_ids", [])
+    }
+    filas = [
+        f for f in filas
+        if getattr(f, "departamento_id", None) is not None
+        and any(
+            (int(f.departamento_id), int(v.instancia_id)) in valid_scope
+            for v in (getattr(f, "instancias", None) or [])
+        )
+    ]
+
     return {
         "ok": True,
         "items": [_fila_payload(f) for f in filas],
@@ -761,7 +857,6 @@ def criar_fila(
         "atendimento.gerenciar",
         "chatbot.configurar",
         "departamentos.gerenciar",
-        "atendimento.ver",
     )
 
     empresa_id_eff = assert_same_company(identity, data.empresa_id)
@@ -779,6 +874,24 @@ def criar_fila(
         departamento_id=data.departamento_id,
     )
 
+    try:
+        validate_queue_chatbot_scope(
+            db,
+            empresa_id=int(empresa_id_eff),
+            departamento_id=data.departamento_id,
+            instancia_ids=data.instancia_ids,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+    if bool(data.ativa):
+        _assert_sem_fila_ativa_conflitante(
+            db,
+            empresa_id=int(empresa_id_eff),
+            departamento_id=int(data.departamento_id),
+            instancia_ids=data.instancia_ids,
+        )
+
     fila = models.FilaAtendimento(
         empresa_id=int(empresa_id_eff),
         departamento_id=data.departamento_id,
@@ -790,9 +903,15 @@ def criar_fila(
         mensagem_padrao=_clean_str(data.mensagem_padrao),
         ativa=bool(data.ativa),
         ordem=int(data.ordem or 0),
-        exigir_aceite=bool(data.exigir_aceite),
-        retorno_ao_liberar=bool(data.retorno_ao_liberar),
-        auto_distribuir=bool(data.auto_distribuir),
+        exigir_aceite=True,
+        retorno_ao_liberar=True,
+        auto_distribuir=False,
+        retorno_inatividade_ativo=bool(data.retorno_inatividade_ativo),
+        retorno_inatividade_minutos=(
+            int(data.retorno_inatividade_minutos)
+            if data.retorno_inatividade_ativo and data.retorno_inatividade_minutos is not None
+            else None
+        ),
     )
 
     db.add(fila)
@@ -843,7 +962,6 @@ def atualizar_fila(
         "atendimento.gerenciar",
         "chatbot.configurar",
         "departamentos.gerenciar",
-        "atendimento.ver",
     )
 
     empresa_id_eff = assert_same_company(identity, data.empresa_id)
@@ -902,8 +1020,48 @@ def atualizar_fila(
     if "retorno_ao_liberar" in payload:
         fila.retorno_ao_liberar = bool(payload.get("retorno_ao_liberar"))
 
-    if "auto_distribuir" in payload:
-        fila.auto_distribuir = bool(payload.get("auto_distribuir"))
+    # Filas do ZapsChat são sempre de aceite manual. O controle configurável
+    # aqui é o prazo para devolver à fila quando ninguém responde.
+    fila.exigir_aceite = True
+    fila.retorno_ao_liberar = True
+    fila.auto_distribuir = False
+
+    if "retorno_inatividade_ativo" in payload:
+        fila.retorno_inatividade_ativo = bool(payload.get("retorno_inatividade_ativo"))
+
+    if "retorno_inatividade_minutos" in payload:
+        fila.retorno_inatividade_minutos = payload.get("retorno_inatividade_minutos")
+
+    if not bool(getattr(fila, "retorno_inatividade_ativo", False)):
+        fila.retorno_inatividade_minutos = None
+    elif getattr(fila, "retorno_inatividade_minutos", None) is None:
+        fila.retorno_inatividade_minutos = 5
+
+    effective_instance_ids = (
+        [int(x) for x in payload.get("instancia_ids") or []]
+        if "instancia_ids" in payload
+        else [int(v.instancia_id) for v in (getattr(fila, "instancias", None) or [])]
+    )
+
+    resulting_active = bool(payload.get("ativa")) if "ativa" in payload else bool(fila.ativa)
+    if resulting_active:
+        try:
+            validate_queue_chatbot_scope(
+                db,
+                empresa_id=int(empresa_id_eff),
+                departamento_id=getattr(fila, "departamento_id", None),
+                instancia_ids=effective_instance_ids,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
+
+        _assert_sem_fila_ativa_conflitante(
+            db,
+            empresa_id=int(empresa_id_eff),
+            departamento_id=int(fila.departamento_id),
+            instancia_ids=effective_instance_ids,
+            exclude_fila_id=int(fila.id),
+        )
 
     if hasattr(fila, "atualizada_em"):
         fila.atualizada_em = _now_utc()
@@ -953,7 +1111,6 @@ def excluir_fila(
         "atendimento.gerenciar",
         "chatbot.configurar",
         "departamentos.gerenciar",
-        "atendimento.ver",
     )
 
     empresa_id_eff = assert_same_company(identity, empresa_id)
@@ -1012,7 +1169,7 @@ def listar_filas_publicas(
     db: Session = Depends(get_db),
 ):
     """
-    Lista filas ativas que podem aparecer no menu do chatbot.
+    Lista legado das filas operacionais ativas; não representa opções do menu do Chatbot.
 
     Observação:
     - Não altera atendimento.
@@ -1056,14 +1213,32 @@ def listar_filas_publicas(
         .all()
     )
 
+    ctx = chatbot_queue_context(db, empresa_id=int(empresa_id))
+    valid_scope = {
+        (int(dep["id"]), int(iid))
+        for dep in ctx.get("departments", [])
+        for iid in dep.get("instancia_ids", [])
+    }
+
     if instancia_id is not None:
         filas = [
             f for f in filas
-            if _fila_permitida_na_instancia(
+            if (getattr(f, "departamento_id", None) is not None and (int(f.departamento_id), int(instancia_id)) in valid_scope)
+            and _fila_permitida_na_instancia(
                 db,
                 empresa_id=int(empresa_id),
                 fila_id=int(f.id),
                 instancia_id=int(instancia_id),
+            )
+        ]
+
+    if instancia_id is None:
+        filas = [
+            f for f in filas
+            if getattr(f, "departamento_id", None) is not None
+            and any(
+                (int(f.departamento_id), int(v.instancia_id)) in valid_scope
+                for v in (getattr(f, "instancias", None) or [])
             )
         ]
 
