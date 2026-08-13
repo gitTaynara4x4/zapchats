@@ -101,6 +101,10 @@ class SubscribeIn(BaseModel):
     creditCardHolderInfo: Optional[CreditCardHolderInfoIn] = None
 
 
+class CompanyDocumentIn(BaseModel):
+    cpf_cnpj: str = Field(..., description="CPF ou CNPJ da empresa")
+
+
 # =========================
 # Helpers gerais
 # =========================
@@ -110,6 +114,87 @@ def _now_utc() -> datetime:
 
 def _digits_only(value: Any) -> str:
     return re.sub(r"\D+", "", str(value or ""))
+
+
+def _is_valid_cpf(value: Any) -> bool:
+    digits = _digits_only(value)
+    if len(digits) != 11 or digits == digits[0] * 11:
+        return False
+
+    total = sum(int(digits[i]) * (10 - i) for i in range(9))
+    first = (total * 10) % 11
+    first = 0 if first == 10 else first
+    if first != int(digits[9]):
+        return False
+
+    total = sum(int(digits[i]) * (11 - i) for i in range(10))
+    second = (total * 10) % 11
+    second = 0 if second == 10 else second
+    return second == int(digits[10])
+
+
+def _is_valid_cnpj(value: Any) -> bool:
+    digits = _digits_only(value)
+    if len(digits) != 14 or digits == digits[0] * 14:
+        return False
+
+    def _digit(base: str, weights: tuple[int, ...]) -> int:
+        total = sum(int(n) * weight for n, weight in zip(base, weights))
+        remainder = total % 11
+        return 0 if remainder < 2 else 11 - remainder
+
+    first = _digit(digits[:12], (5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2))
+    if first != int(digits[12]):
+        return False
+    second = _digit(digits[:13], (6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2))
+    return second == int(digits[13])
+
+
+def _is_valid_company_document(value: Any) -> bool:
+    digits = _digits_only(value)
+    if len(digits) == 11:
+        return _is_valid_cpf(digits)
+    if len(digits) == 14:
+        return _is_valid_cnpj(digits)
+    return False
+
+
+def _format_company_document(value: Any) -> str:
+    digits = _digits_only(value)
+    if len(digits) == 11:
+        return f"{digits[:3]}.{digits[3:6]}.{digits[6:9]}-{digits[9:]}"
+    if len(digits) == 14:
+        return f"{digits[:2]}.{digits[2:5]}.{digits[5:8]}/{digits[8:12]}-{digits[12:]}"
+    return digits
+
+
+def _company_document_detail(emp: models.Empresa, *, submitted: Any = None) -> Dict[str, Any]:
+    current = _digits_only(submitted if submitted is not None else getattr(emp, "cnpj_cpf", None))
+    code = "invalid_company_document" if current else "company_document_required"
+    message = (
+        "O CPF/CNPJ cadastrado na sua empresa é inválido. Corrija o documento para continuar com a assinatura."
+        if current
+        else "Informe o CPF/CNPJ da empresa para continuar com a assinatura."
+    )
+    return {
+        "code": code,
+        "field": "cnpj_cpf",
+        "message": message,
+        "cpf_cnpj": current,
+        "cpf_cnpj_formatted": _format_company_document(current),
+        "profile_url": "/perfil?empresa=1",
+    }
+
+
+def _asaas_reports_invalid_document(exc: AsaasAPIError) -> bool:
+    try:
+        payload_text = json.dumps(exc.payload or {}, ensure_ascii=False)
+    except Exception:
+        payload_text = str(exc.payload or "")
+    text_value = f"{exc} {payload_text}".lower()
+    return ("cpf/cnpj" in text_value or "cpfcnpj" in text_value) and (
+        "inválid" in text_value or "invalid" in text_value
+    )
 
 
 def _id_get(obj: Any, key: str, default: Any = None) -> Any:
@@ -150,6 +235,17 @@ def _asaas_enabled() -> bool:
         "no",
         "off",
     }
+
+
+def _asaas_env_name() -> str:
+    raw = str(os.getenv("ASAAS_ENV", "sandbox") or "sandbox").strip().lower()
+    if raw in {"prod", "production", "producao", "produção"}:
+        return "production"
+    return "sandbox"
+
+
+def _asaas_is_sandbox() -> bool:
+    return _asaas_env_name() == "sandbox"
 
 
 def _require_asaas_enabled() -> None:
@@ -340,75 +436,14 @@ def _lock_empresa_billing(db: Session, empresa_id: int) -> None:
 
 
 def _ensure_billing_schema(db: Session) -> None:
-    db.execute(text("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS billing_provider VARCHAR(30)"))
-    db.execute(text("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS billing_status VARCHAR(40)"))
-    db.execute(text("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS billing_plan_pending VARCHAR(40)"))
-    db.execute(text("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS asaas_customer_id VARCHAR(120)"))
-    db.execute(text("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS asaas_subscription_id VARCHAR(120)"))
-    db.execute(text("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS asaas_last_payment_id VARCHAR(120)"))
-    db.execute(text("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS asaas_billing_type VARCHAR(30)"))
-    db.execute(text("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS billing_updated_at TIMESTAMP WITH TIME ZONE"))
+    """Compatibilidade interna.
 
-    db.execute(
-        text(
-            """
-            CREATE TABLE IF NOT EXISTS billing_asaas_events (
-              id SERIAL PRIMARY KEY,
-              event_id VARCHAR(180) NOT NULL,
-              empresa_id INTEGER NULL REFERENCES empresas(id) ON DELETE SET NULL,
-              event VARCHAR(80) NULL,
-              payment_id VARCHAR(120) NULL,
-              subscription_id VARCHAR(120) NULL,
-              payload JSONB NOT NULL,
-              created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
-            )
-            """
-        )
-    )
-
-    db.execute(
-        text(
-            """
-            DO $$
-            BEGIN
-              IF NOT EXISTS (
-                SELECT 1
-                FROM pg_constraint
-                WHERE conname = 'uq_billing_asaas_event_id'
-              ) THEN
-                ALTER TABLE billing_asaas_events
-                ADD CONSTRAINT uq_billing_asaas_event_id UNIQUE (event_id);
-              END IF;
-            END $$
-            """
-        )
-    )
-
-    db.execute(text("CREATE INDEX IF NOT EXISTS ix_billing_asaas_events_empresa ON billing_asaas_events (empresa_id)"))
-    db.execute(text("CREATE INDEX IF NOT EXISTS ix_billing_asaas_events_payment ON billing_asaas_events (payment_id)"))
-    db.execute(text("CREATE INDEX IF NOT EXISTS ix_billing_asaas_events_subscription ON billing_asaas_events (subscription_id)"))
-
-    db.execute(
-        text(
-            """
-            CREATE TABLE IF NOT EXISTS billing_asaas_payment_credits (
-              id SERIAL PRIMARY KEY,
-              payment_id VARCHAR(120) NOT NULL UNIQUE,
-              empresa_id INTEGER NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
-              subscription_id VARCHAR(120) NULL,
-              plan VARCHAR(40) NOT NULL,
-              payment_status VARCHAR(40) NULL,
-              event_id VARCHAR(180) NULL,
-              credited_days INTEGER NOT NULL DEFAULT 30,
-              credited_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
-              reversed_at TIMESTAMP WITH TIME ZONE NULL,
-              reversal_event_id VARCHAR(180) NULL
-            )
-            """
-        )
-    )
-    db.execute(text("CREATE INDEX IF NOT EXISTS ix_billing_asaas_credits_empresa ON billing_asaas_payment_credits (empresa_id)"))
-    db.execute(text("CREATE INDEX IF NOT EXISTS ix_billing_asaas_credits_subscription ON billing_asaas_payment_credits (subscription_id)"))
+    O schema do billing é garantido uma única vez no startup por
+    ``ensure_billing_asaas_schema``. Não execute DDL dentro de requests: além
+    de ser caro, ``ALTER TABLE`` exige locks fortes no PostgreSQL e pode
+    deadlockar quando status/sync/subscribe chegam ao mesmo tempo.
+    """
+    return None
 
 
 def _billing_row(db: Session, empresa_id: int) -> Dict[str, Any]:
@@ -478,6 +513,12 @@ def _ensure_asaas_customer(db: Session, emp: models.Empresa, client: AsaasClient
         return existing
 
     cpf_cnpj = _digits_only(getattr(emp, "cnpj_cpf", None))
+    if not _is_valid_company_document(cpf_cnpj):
+        raise HTTPException(
+            status_code=422,
+            detail=_company_document_detail(emp),
+        )
+
     phone = _digits_only(getattr(emp, "telefone", None))
     email = _owner_email(db, int(emp.id))
 
@@ -1053,6 +1094,14 @@ def _status_response(db: Session, emp: models.Empresa) -> Dict[str, Any]:
         "trial_days": int(os.getenv("TRIAL_DAYS", "14") or "14"),
         "cycle_days": PLAN_CYCLE_DAYS,
         "asaas_enabled": _asaas_enabled(),
+        "asaas_env": _asaas_env_name(),
+        "sandbox_mode": _asaas_is_sandbox(),
+        "company": {
+            "name": getattr(emp, "nome", None),
+            "cnpj_cpf": _digits_only(getattr(emp, "cnpj_cpf", None)),
+            "cnpj_cpf_formatted": _format_company_document(getattr(emp, "cnpj_cpf", None)),
+            "cnpj_cpf_valid": _is_valid_company_document(getattr(emp, "cnpj_cpf", None)),
+        },
     }
 
 
@@ -1065,6 +1114,105 @@ def billing_status(
     _ensure_billing_schema(db)
     emp = _empresa_or_404(db, empresa_id)
     return _status_response(db, emp)
+
+
+@router.get("/company-document")
+def get_company_document(
+    db: Session = Depends(get_db_session),
+    identity: Any = Depends(get_current_user),
+):
+    empresa_id = _require_empresa_id(identity)
+    _ensure_billing_schema(db)
+    emp = _empresa_or_404(db, empresa_id)
+    digits = _digits_only(getattr(emp, "cnpj_cpf", None))
+    return {
+        "ok": True,
+        "company": {
+            "id": int(emp.id),
+            "name": getattr(emp, "nome", None),
+            "cnpj_cpf": digits,
+            "cnpj_cpf_formatted": _format_company_document(digits),
+            "cnpj_cpf_valid": _is_valid_company_document(digits),
+        },
+    }
+
+
+@router.put("/company-document")
+def update_company_document(
+    body: CompanyDocumentIn,
+    db: Session = Depends(get_db_session),
+    identity: Any = Depends(get_current_user),
+):
+    empresa_id = _require_empresa_id(identity)
+    _ensure_billing_schema(db)
+    emp = _empresa_or_404(db, empresa_id)
+    _lock_empresa_billing(db, empresa_id)
+
+    digits = _digits_only(body.cpf_cnpj)
+    if not _is_valid_company_document(digits):
+        db.rollback()
+        raise HTTPException(
+            status_code=422,
+            detail=_company_document_detail(emp, submitted=digits),
+        )
+
+    duplicate = (
+        db.query(models.Empresa)
+        .filter(
+            models.Empresa.id != int(empresa_id),
+            models.Empresa.cnpj_cpf.in_([digits, _format_company_document(digits)]),
+        )
+        .first()
+    )
+    if duplicate:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "company_document_in_use",
+                "field": "cnpj_cpf",
+                "message": "Este CPF/CNPJ já está vinculado a outra empresa no ZapsChat.",
+            },
+        )
+
+    row = _billing_row(db, empresa_id)
+    customer_id = str(row.get("asaas_customer_id") or "").strip()
+    if customer_id and _asaas_enabled():
+        try:
+            AsaasClient().update_customer(customer_id, {"cpfCnpj": digits})
+        except AsaasAPIError as exc:
+            db.rollback()
+            if _asaas_reports_invalid_document(exc):
+                raise HTTPException(
+                    status_code=422,
+                    detail=_company_document_detail(emp, submitted=digits),
+                )
+            raise HTTPException(
+                status_code=400 if exc.status_code < 500 else 502,
+                detail={
+                    "code": "asaas_customer_update_failed",
+                    "message": str(exc),
+                    "asaas_status": exc.status_code,
+                    "asaas_payload": exc.payload,
+                },
+            )
+
+    emp.cnpj_cpf = digits
+    db.add(emp)
+    db.commit()
+    db.refresh(emp)
+
+    return {
+        "ok": True,
+        "message": "CPF/CNPJ da empresa atualizado com sucesso.",
+        "company": {
+            "id": int(emp.id),
+            "name": getattr(emp, "nome", None),
+            "cnpj_cpf": digits,
+            "cnpj_cpf_formatted": _format_company_document(digits),
+            "cnpj_cpf_valid": True,
+        },
+    }
 
 
 @router.post("/sync")
@@ -1172,6 +1320,145 @@ def sync_payment_status(
     }
 
 
+
+@router.post("/sandbox/confirm-payment")
+def confirm_sandbox_payment(
+    db: Session = Depends(get_db_session),
+    identity: Any = Depends(get_current_user),
+):
+    """Simula o pagamento da cobrança atual exclusivamente no Sandbox do Asaas.
+
+    O endpoint nunca fica disponível para confirmar pagamentos reais: além do
+    botão existir apenas no frontend em Sandbox, esta rota valida o ambiente
+    novamente no backend antes de chamar a API oficial de homologação.
+    """
+    _require_asaas_enabled()
+    _ensure_billing_schema(db)
+
+    if not _asaas_is_sandbox():
+        raise HTTPException(status_code=404, detail="Simulação de pagamento disponível somente no Sandbox.")
+
+    empresa_id = _require_empresa_id(identity)
+    emp = _empresa_or_404(db, empresa_id)
+    _lock_empresa_billing(db, empresa_id)
+    row = _billing_row(db, empresa_id)
+
+    subscription_id = str(row.get("asaas_subscription_id") or "").strip() or None
+    payment_id = str(row.get("asaas_last_payment_id") or "").strip() or None
+    billing_type = str(row.get("asaas_billing_type") or "").strip().upper() or None
+    plan = normalize_plan(row.get("billing_plan_pending") or getattr(emp, "assinatura", None))
+
+    client = AsaasClient()
+
+    # Se o ID local ainda não foi persistido, recupera a cobrança aberta da
+    # assinatura antes de simular. Isso evita exigir payment_id do navegador.
+    if not payment_id and subscription_id:
+        try:
+            payments = _subscription_payments(client, subscription_id)
+        except AsaasAPIError as exc:
+            db.rollback()
+            raise HTTPException(
+                status_code=502,
+                detail={
+                    "message": "Não foi possível localizar a cobrança de teste no Asaas.",
+                    "asaas_status": exc.status_code,
+                    "asaas_payload": exc.payload,
+                },
+            )
+
+        selected = _oldest_open_payment(payments) or _latest_paid_payment(payments) or (payments[0] if payments else None)
+        payment_id = str((selected or {}).get("id") or "").strip() or None
+        billing_type = str((selected or {}).get("billingType") or billing_type or "").strip().upper() or None
+
+    if not payment_id:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "sandbox_payment_not_found",
+                "message": "Nenhuma cobrança pendente foi encontrada para simular o pagamento.",
+            },
+        )
+
+    if plan not in {PLAN_START, PLAN_BUSINESS, PLAN_ENTERPRISE}:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "sandbox_plan_not_found",
+                "message": "Não foi possível identificar o plano desta cobrança de teste.",
+            },
+        )
+
+    try:
+        confirmation = client.confirm_sandbox_payment(payment_id)
+        payment = client.get_payment(payment_id)
+    except AsaasAPIError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=400 if exc.status_code < 500 else 502,
+            detail={
+                "code": "sandbox_confirm_failed",
+                "message": str(exc),
+                "asaas_status": exc.status_code,
+                "asaas_payload": exc.payload,
+            },
+        )
+
+    payment_status = str((payment or {}).get("status") or "").strip().upper()
+    if not _payment_is_paid(payment):
+        db.rollback()
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "code": "sandbox_payment_not_confirmed",
+                "message": "O Asaas recebeu a simulação, mas a cobrança ainda não apareceu como paga. Atualize o status e tente novamente.",
+                "payment_status": payment_status or None,
+            },
+        )
+
+    credited, _ = _activate_payment_once(
+        db,
+        emp,
+        plan,
+        payment_id,
+        subscription_id,
+        payment_status,
+        f"sandbox-confirm:{payment_id}:{payment_status}",
+    )
+    db.add(emp)
+
+    _update_billing_fields(
+        db,
+        empresa_id,
+        billing_provider="asaas",
+        billing_status="active",
+        billing_plan_pending=plan,
+        asaas_last_payment_id=payment_id,
+        asaas_subscription_id=subscription_id,
+        asaas_billing_type=billing_type,
+    )
+    db.commit()
+    db.refresh(emp)
+
+    extras = _payment_extras(client, billing_type or "", payment_id)
+    return {
+        **_status_response(db, emp),
+        "ok": True,
+        "sandbox_simulated": True,
+        "credited": credited,
+        "message": "Pagamento de teste confirmado e plano liberado.",
+        "plan": plan,
+        "plan_name": _plan_name(plan),
+        "amount": (payment or {}).get("value") or _plan_amount(plan),
+        "billing_type": billing_type,
+        "subscription_id": subscription_id,
+        "payment": payment,
+        "sandbox_confirmation": confirmation,
+        **extras,
+    }
+
+
 @router.post("/subscribe")
 def create_subscription(
     body: SubscribeIn,
@@ -1265,7 +1552,28 @@ def create_subscription(
         )
         db.flush()
 
-    customer_id = _ensure_asaas_customer(db, emp, client)
+    try:
+        customer_id = _ensure_asaas_customer(db, emp, client)
+    except HTTPException:
+        db.rollback()
+        raise
+    except AsaasAPIError as exc:
+        db.rollback()
+        if _asaas_reports_invalid_document(exc):
+            raise HTTPException(
+                status_code=422,
+                detail=_company_document_detail(emp),
+            )
+        raise HTTPException(
+            status_code=400 if exc.status_code < 500 else 502,
+            detail={
+                "code": "asaas_customer_error",
+                "message": str(exc),
+                "asaas_status": exc.status_code,
+                "asaas_payload": exc.payload,
+            },
+        )
+
     amount = _plan_amount(plan)
     external_ref = f"zapschat:empresa:{empresa_id}:plano:{plan}"
 

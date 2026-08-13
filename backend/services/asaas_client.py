@@ -273,6 +273,25 @@ class AsaasClient:
     def get_payment(self, payment_id: str) -> Dict[str, Any]:
         return self._request("GET", f"{self.payments_path}/{payment_id}")
 
+    def confirm_sandbox_payment(self, payment_id: str) -> Dict[str, Any]:
+        """
+        Confirma uma cobrança exclusivamente no ambiente Sandbox do Asaas.
+
+        Endpoint oficial:
+          POST /v3/sandbox/payment/{id}/confirm
+
+        O método faz uma segunda proteção além da rota do backend: mesmo que
+        seja chamado por engano, nunca envia a simulação para produção.
+        """
+        if self.env in {"prod", "production", "producao", "produção"}:
+            raise AsaasAPIError(403, "A confirmação simulada só existe no Sandbox do Asaas.")
+
+        payment_id = str(payment_id or "").strip()
+        if not payment_id:
+            raise AsaasAPIError(400, "ID da cobrança não informado para a simulação.")
+
+        return self._request("POST", f"/v3/sandbox/payment/{payment_id}/confirm")
+
     def delete_payment(self, payment_id: str) -> Dict[str, Any]:
         return self._request("DELETE", f"{self.payments_path}/{payment_id}")
 

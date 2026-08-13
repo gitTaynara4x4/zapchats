@@ -198,6 +198,36 @@
             </form>
           </article>
 
+          <article class="profile-card" id="companyDocumentCard" hidden>
+            <div class="profile-card-head">
+              <div>
+                <h2>Dados da empresa</h2>
+                <p>Este documento é usado para assinatura, cobrança e identificação da empresa.</p>
+              </div>
+              <div class="profile-security-icon"><i class="fa-regular fa-building" aria-hidden="true"></i></div>
+            </div>
+
+            <form id="formCompanyDocument" class="profile-form" autocomplete="off" novalidate>
+              <div class="profile-field profile-field--full">
+                <label for="companyDocument">CPF/CNPJ da empresa <span aria-hidden="true">*</span></label>
+                <div class="profile-input-wrap">
+                  <i class="fa-regular fa-id-card" aria-hidden="true"></i>
+                  <input type="text" id="companyDocument" name="companyDocument" maxlength="18" inputmode="numeric" placeholder="000.000.000-00 ou 00.000.000/0000-00" />
+                </div>
+                <small class="profile-field-note">Use um CPF ou CNPJ válido. O mesmo dado será usado pelo Asaas nas cobranças.</small>
+                <small class="profile-field-error" id="companyDocumentError"></small>
+              </div>
+
+              <div class="profile-form-actions">
+                <a href="/meu-plano" class="profile-btn profile-btn--secondary">Voltar para assinatura</a>
+                <button type="submit" class="profile-btn profile-btn--primary" id="btnSaveCompanyDocument">
+                  <i class="fa-regular fa-floppy-disk" aria-hidden="true"></i>
+                  Salvar CPF/CNPJ
+                </button>
+              </div>
+            </form>
+          </article>
+
           <article class="profile-card">
             <div class="profile-card-head">
               <div>
@@ -271,7 +301,7 @@
   <div class="profile-toast-host" id="profileToastHost" aria-live="polite" aria-atomic="true"></div>
 
   <script src="/frontend/js/page-guard.js" defer></script>
-  <script src="/frontend/js/pages/perfil.js?v=20260726-perfil-loader-presenca-fix" defer></script>
+  <script src="/frontend/js/pages/perfil.js?v=20260813-company-document" defer></script>
   <script src="/frontend/js/pages/dashboard-onboarding.js?v=20260727-onboarding-v2" defer></script>
 </body>
 </html>

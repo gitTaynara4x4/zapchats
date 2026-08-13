@@ -79,6 +79,7 @@ from backend.migrations.clientes_sequence import ensure_clientes_id_sequence
 from backend.migrations.user_onboarding import ensure_user_onboarding
 from backend.migrations.fila_retorno_inatividade import ensure_fila_retorno_inatividade
 from backend.migrations.atendimento_historico_performance import ensure_atendimento_historico_performance
+from backend.migrations.billing_asaas_schema import ensure_billing_asaas_schema
 from backend.services.fila_atendimento_runtime import start_fila_timeout_worker, stop_fila_timeout_worker
 
 # Integrações Evolution
@@ -1567,6 +1568,7 @@ async def _start_integrations():
             ensure_user_onboarding(engine, LOG)
             ensure_fila_retorno_inatividade(engine, LOG)
             ensure_atendimento_historico_performance(engine, LOG)
+            ensure_billing_asaas_schema(engine, LOG)
             db_ok = True
             LOG("[STARTUP] DB ok e tabelas garantidas.")
             break

@@ -24,6 +24,8 @@
       'infoPermissoes', 'infoIdentificacao', 'sessionBrowser', 'sessionSystem',
       'btnLogoutCurrent', 'formPerfil', 'nome', 'email', 'telefone', 'cargo',
       'btnSalvarPerfil', 'btnCancelarPerfil', 'profileSaveState',
+      'companyDocumentCard', 'formCompanyDocument', 'companyDocument',
+      'companyDocumentError', 'btnSaveCompanyDocument',
       'formSenha', 'senha_atual', 'nova_senha', 'confirma_senha',
       'btnSalvarSenha', 'passwordStrengthBar', 'passwordStrengthText',
       'passwordRules', 'profileToastHost',
@@ -64,10 +66,13 @@
       if (response.status === 401) {
         setTimeout(() => { window.location.href = '/login.html?next=/perfil.html'; }, 700);
       }
-      const message = typeof data === 'object' && data
-        ? (data.detail || data.message || data.erro)
-        : data;
-      throw new Error(clean(message) || `Erro ${response.status} ao processar a solicitação.`);
+      const detail = typeof data === 'object' && data ? data.detail : null;
+      const message = typeof detail === 'object' && detail
+        ? (detail.message || detail.erro || detail.code)
+        : (typeof data === 'object' && data ? (detail || data.message || data.erro) : data);
+      const error = new Error(clean(message) || `Erro ${response.status} ao processar a solicitação.`);
+      error.data = data;
+      throw error;
     }
     return data;
   }
@@ -112,6 +117,57 @@
       return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`;
     }
     return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
+  }
+
+  function onlyDigits(value) {
+    return String(value || '').replace(/\D+/g, '');
+  }
+
+  function formatCpfCnpj(value) {
+    const digits = onlyDigits(value).slice(0, 14);
+    if (digits.length <= 11) {
+      return digits
+        .replace(/^(\d{3})(\d)/, '$1.$2')
+        .replace(/^(\d{3})\.(\d{3})(\d)/, '$1.$2.$3')
+        .replace(/(\d{3})(\d{1,2})$/, '$1-$2');
+    }
+    return digits
+      .replace(/^(\d{2})(\d)/, '$1.$2')
+      .replace(/^(\d{2})\.(\d{3})(\d)/, '$1.$2.$3')
+      .replace(/\.(\d{3})(\d)/, '.$1/$2')
+      .replace(/(\d{4})(\d{1,2})$/, '$1-$2');
+  }
+
+  function isValidCPF(value) {
+    const digits = onlyDigits(value);
+    if (digits.length !== 11 || /^(\d)\1{10}$/.test(digits)) return false;
+    const calc = (len) => {
+      let total = 0;
+      for (let i = 0; i < len; i += 1) total += Number(digits[i]) * ((len + 1) - i);
+      let check = (total * 10) % 11;
+      if (check === 10) check = 0;
+      return check;
+    };
+    return calc(9) === Number(digits[9]) && calc(10) === Number(digits[10]);
+  }
+
+  function isValidCNPJ(value) {
+    const digits = onlyDigits(value);
+    if (digits.length !== 14 || /^(\d)\1{13}$/.test(digits)) return false;
+    const digit = (base, weights) => {
+      const total = base.split('').reduce((sum, n, index) => sum + Number(n) * weights[index], 0);
+      const remainder = total % 11;
+      return remainder < 2 ? 0 : 11 - remainder;
+    };
+    const first = digit(digits.slice(0, 12), [5,4,3,2,9,8,7,6,5,4,3,2]);
+    if (first !== Number(digits[12])) return false;
+    const second = digit(digits.slice(0, 13), [6,5,4,3,2,9,8,7,6,5,4,3,2]);
+    return second === Number(digits[13]);
+  }
+
+  function isValidCpfCnpj(value) {
+    const digits = onlyDigits(value);
+    return digits.length === 11 ? isValidCPF(digits) : digits.length === 14 ? isValidCNPJ(digits) : false;
   }
 
   function parseDate(value) {
@@ -269,6 +325,68 @@
     } catch {}
   }
 
+  async function loadCompanyDocument() {
+    if (!els.companyDocumentCard || !els.companyDocument) return;
+    if (!state.profile?.is_admin) {
+      els.companyDocumentCard.hidden = true;
+      return;
+    }
+
+    try {
+      const data = await api('/api/billing/asaas/company-document');
+      const company = data?.company || {};
+      els.companyDocument.value = formatCpfCnpj(company.cnpj_cpf || '');
+      els.companyDocumentError.textContent = company.cnpj_cpf_valid === false && company.cnpj_cpf
+        ? 'O documento atual é inválido. Corrija para evitar falhas na assinatura.'
+        : '';
+      els.companyDocumentCard.hidden = false;
+
+      if (new URLSearchParams(window.location.search).get('empresa') === '1') {
+        requestAnimationFrame(() => {
+          els.companyDocumentCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          setTimeout(() => els.companyDocument.focus(), 350);
+        });
+      }
+    } catch (error) {
+      els.companyDocumentCard.hidden = false;
+      els.companyDocumentError.textContent = error.message || 'Não foi possível carregar o CPF/CNPJ da empresa.';
+    }
+  }
+
+  async function saveCompanyDocument(event) {
+    event.preventDefault();
+    if (!state.profile?.is_admin) return;
+
+    const digits = onlyDigits(els.companyDocument.value);
+    els.companyDocumentError.textContent = '';
+    els.companyDocument.classList.remove('is-invalid');
+
+    if (!isValidCpfCnpj(digits)) {
+      els.companyDocument.classList.add('is-invalid');
+      els.companyDocumentError.textContent = 'Informe um CPF ou CNPJ válido.';
+      els.companyDocument.focus();
+      return;
+    }
+
+    setBusy(els.btnSaveCompanyDocument, true, 'Salvando...');
+    try {
+      const data = await api('/api/billing/asaas/company-document', {
+        method: 'PUT',
+        body: JSON.stringify({ cpf_cnpj: digits }),
+      });
+      els.companyDocument.value = formatCpfCnpj(data?.company?.cnpj_cpf || digits);
+      els.companyDocument.classList.remove('is-invalid');
+      els.companyDocumentError.textContent = '';
+      toast('Dados da empresa atualizados', 'O CPF/CNPJ já será usado nas próximas cobranças.');
+    } catch (error) {
+      els.companyDocument.classList.add('is-invalid');
+      els.companyDocumentError.textContent = error.message || 'Não foi possível salvar o CPF/CNPJ.';
+      toast('Não foi possível salvar', error.message, 'error');
+    } finally {
+      setBusy(els.btnSaveCompanyDocument, false);
+    }
+  }
+
   async function loadProfile({ silent = false } = {}) {
     if (state.loading) return;
     state.loading = true;
@@ -283,6 +401,7 @@
     try {
       const profile = await api('/api/perfil');
       renderProfile(profile);
+      await loadCompanyDocument();
       els.profileLoading.hidden = true;
       els.profileContent.hidden = false;
       ensureProfilePresence();
@@ -593,6 +712,15 @@
     });
     els.avatarInput.addEventListener('change', () => uploadAvatar(els.avatarInput.files?.[0]));
     els.btnRemoveAvatar.addEventListener('click', removeAvatar);
+
+    if (els.formCompanyDocument) {
+      els.formCompanyDocument.addEventListener('submit', saveCompanyDocument);
+      els.companyDocument.addEventListener('input', () => {
+        els.companyDocument.value = formatCpfCnpj(els.companyDocument.value);
+        els.companyDocument.classList.remove('is-invalid');
+        els.companyDocumentError.textContent = '';
+      });
+    }
 
     els.formSenha.addEventListener('submit', savePassword);
     [els.nova_senha, els.confirma_senha].forEach((input) => input.addEventListener('input', renderPasswordStrength));
