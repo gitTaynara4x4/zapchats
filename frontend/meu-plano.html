@@ -2559,7 +2559,8 @@
       selectedPlan: null,
       selectedMethod: "PIX",
       polling: null,
-      documentFixOpen: false
+      documentFixOpen: false,
+      paymentCompletedUiHandled: false
     };
 
     const $ = (sel, root = document) => root.querySelector(sel);
@@ -3136,6 +3137,7 @@
       const plan = getPlan(planCode);
       state.selectedPlan = plan;
       state.selectedMethod = "PIX";
+      state.paymentCompletedUiHandled = false;
 
       $("#modalTitle").textContent = `Assinar ${plan.name}`;
       $("#modalSubtitle").textContent = "Finalize sua assinatura com segurança.";
@@ -3493,10 +3495,60 @@
       `;
     }
 
+    function safePostPaymentDestination() {
+      try {
+        const params = new URLSearchParams(location.search);
+        if (String(params.get("billing") || "").toLowerCase() !== "locked") return "";
+        const next = String(params.get("next") || "").trim();
+        return /^\/(?!\/)/.test(next) ? next : "";
+      } catch (_) {
+        return "";
+      }
+    }
+
+    function finishPaidCheckout(data) {
+      if (state.paymentCompletedUiHandled) return;
+      state.paymentCompletedUiHandled = true;
+
+      if (state.polling) {
+        clearInterval(state.polling);
+        state.polling = null;
+      }
+
+      if ($("#paymentStatusText")) $("#paymentStatusText").textContent = "Pagamento confirmado";
+      setPaymentAlert("", "");
+      toast("Pagamento confirmado e plano liberado");
+
+      const destination = safePostPaymentDestination();
+      window.setTimeout(() => {
+        if (destination) {
+          location.assign(destination);
+          return;
+        }
+        closeCheckout();
+      }, 1200);
+    }
+
     async function refreshStatus(showToast = true, synchronize = true) {
       const data = await loadStatus(synchronize);
       renderStatus(data);
-      if (data?.payment && String(data?.billing?.billing_status || "").toLowerCase() !== "active") {
+
+      const billingStatus = String(data?.billing?.billing_status || "").toLowerCase();
+      const isActive = billingStatus === "active" || Boolean(data?.plan_status?.paid?.active);
+
+      if (isActive) {
+        renderPaymentResult({
+          ...data,
+          plan: data?.billing?.billing_plan_pending || data?.plan_status?.effective_tier,
+          plan_name: getPlan(data?.billing?.billing_plan_pending || data?.plan_status?.effective_tier).name,
+          amount: data?.payment?.value,
+          subscription_id: data?.billing?.asaas_subscription_id
+        });
+        finishPaidCheckout(data);
+        return data;
+      }
+
+      if (data?.payment) {
         renderPaymentResult({
           ...data,
           plan: data?.billing?.billing_plan_pending,
@@ -3505,6 +3557,7 @@
           subscription_id: data?.billing?.asaas_subscription_id
         });
       }
+
       if (showToast) toast(data?.credited ? "Pagamento confirmado e plano liberado" : "Status atualizado");
       return data;
     }

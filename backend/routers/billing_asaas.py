@@ -197,6 +197,44 @@ def _asaas_reports_invalid_document(exc: AsaasAPIError) -> bool:
     )
 
 
+def _asaas_customer_missing(exc: AsaasAPIError) -> bool:
+    """Detecta ID de cliente inexistente/obsoleto no Asaas.
+
+    Um ``asaas_customer_id`` pode ficar salvo localmente depois que o cliente
+    foi removido no Sandbox ou quando a base de homologação foi recriada.
+    Nesses casos o ZapsChat deve reconstruir o vínculo automaticamente, sem
+    expor ao usuário o erro técnico "Cliente inválido ou não informado".
+    """
+    status_code = int(getattr(exc, "status_code", 0) or 0)
+    if status_code in {404, 410}:
+        return True
+
+    parts = [str(exc or "")]
+    payload = getattr(exc, "payload", None)
+    if payload is not None:
+        try:
+            parts.append(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+        except Exception:
+            parts.append(str(payload))
+
+    text_value = " ".join(parts).lower()
+    customer_marker = "cliente" in text_value or "customer" in text_value
+    missing_markers = (
+        "inválid",
+        "invalid",
+        "não informado",
+        "nao informado",
+        "não encontrado",
+        "nao encontrado",
+        "inexistente",
+        "not found",
+        "does not exist",
+        "not informed",
+        "missing",
+    )
+    return customer_marker and any(marker in text_value for marker in missing_markers)
+
+
 def _id_get(obj: Any, key: str, default: Any = None) -> Any:
     if obj is None:
         return default
@@ -506,11 +544,33 @@ def _update_billing_fields(db: Session, empresa_id: int, **fields: Any) -> None:
 # Asaas helpers
 # =========================
 def _ensure_asaas_customer(db: Session, emp: models.Empresa, client: AsaasClient) -> str:
-    row = _billing_row(db, int(emp.id))
+    empresa_id = int(emp.id)
+    row = _billing_row(db, empresa_id)
     existing = str(row.get("asaas_customer_id") or "").strip()
 
     if existing:
-        return existing
+        try:
+            remote_customer = client.get_customer(existing)
+            if isinstance(remote_customer, dict) and str(remote_customer.get("id") or "").strip():
+                return existing
+        except AsaasAPIError as exc:
+            if not _asaas_customer_missing(exc):
+                raise
+
+        # O ID local aponta para um cliente que já não existe no Asaas.
+        # Limpa apenas o vínculo remoto e deixa o fluxo abaixo localizar o
+        # cliente novamente por CPF/CNPJ/e-mail ou criá-lo de forma segura.
+        _update_billing_fields(
+            db,
+            empresa_id,
+            asaas_customer_id=None,
+            billing_status="customer_missing",
+        )
+        db.flush()
+        print(
+            f"[BILLING][ASAAS] cliente local obsoleto limpo "
+            f"empresa={empresa_id} customer={existing}"
+        )
 
     cpf_cnpj = _digits_only(getattr(emp, "cnpj_cpf", None))
     if not _is_valid_company_document(cpf_cnpj):
@@ -520,7 +580,7 @@ def _ensure_asaas_customer(db: Session, emp: models.Empresa, client: AsaasClient
         )
 
     phone = _digits_only(getattr(emp, "telefone", None))
-    email = _owner_email(db, int(emp.id))
+    email = _owner_email(db, empresa_id)
 
     payload: Dict[str, Any] = {
         "name": getattr(emp, "nome", None) or f"Empresa {emp.id}",
@@ -555,7 +615,7 @@ def _ensure_asaas_customer(db: Session, emp: models.Empresa, client: AsaasClient
                 customer_id = str(item["id"])
                 _update_billing_fields(
                     db,
-                    int(emp.id),
+                    empresa_id,
                     billing_provider="asaas",
                     asaas_customer_id=customer_id,
                     billing_status="customer_created",
@@ -574,7 +634,7 @@ def _ensure_asaas_customer(db: Session, emp: models.Empresa, client: AsaasClient
 
     _update_billing_fields(
         db,
-        int(emp.id),
+        empresa_id,
         billing_provider="asaas",
         asaas_customer_id=str(customer_id),
         billing_status="customer_created",
@@ -651,6 +711,101 @@ def _current_payment_from_subscription(
             time.sleep(0.35 * (attempt + 1))
 
     return None
+
+
+def _asaas_subscription_missing(exc: AsaasAPIError) -> bool:
+    """Retorna True quando o Asaas informa que a assinatura já não existe.
+
+    O cancelamento de assinatura precisa ser idempotente: se o ZapsChat ainda
+    tiver um ``asaas_subscription_id`` local, mas a assinatura já tiver sido
+    removida no Asaas (muito comum durante testes Sandbox), isso não deve
+    bloquear a criação de uma nova assinatura.
+    """
+    if int(getattr(exc, "status_code", 0) or 0) in {404, 410}:
+        return True
+
+    parts = [str(exc or "")]
+    payload = getattr(exc, "payload", None)
+    if payload is not None:
+        try:
+            parts.append(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+        except Exception:
+            parts.append(str(payload))
+
+    text_value = " ".join(parts).lower()
+    markers = (
+        "assinatura não encontrada",
+        "assinatura nao encontrada",
+        "assinatura inexistente",
+        "assinatura já removida",
+        "assinatura ja removida",
+        "subscription not found",
+        "subscription does not exist",
+        "subscription already removed",
+        "subscription already deleted",
+    )
+    return any(marker in text_value for marker in markers)
+
+
+def _remove_subscription_for_replacement(
+    client: AsaasClient,
+    subscription_id: str,
+) -> Dict[str, Any]:
+    """Remove uma assinatura antiga sem travar em estado local obsoleto.
+
+    Produção continua conservadora: qualquer falha real mantém o bloqueio para
+    impedir cobrança duplicada. No Sandbox, se a assinatura existir mas o Asaas
+    recusar a primeira remoção, tentamos inativá-la e remover novamente.
+    """
+    subscription_id = str(subscription_id or "").strip()
+    if not subscription_id:
+        return {"removed": True, "already_absent": True}
+
+    try:
+        client.delete_subscription(subscription_id)
+        return {"removed": True, "already_absent": False}
+    except AsaasAPIError as first_exc:
+        if _asaas_subscription_missing(first_exc):
+            return {"removed": True, "already_absent": True}
+
+        # Confirma se o ID local ficou obsoleto. Alguns estados antigos podem
+        # responder erro no DELETE, mas o GET já informa que o recurso sumiu.
+        try:
+            client.get_subscription(subscription_id)
+        except AsaasAPIError as check_exc:
+            if _asaas_subscription_missing(check_exc):
+                return {"removed": True, "already_absent": True}
+
+        # Sandbox é descartável. Uma tentativa extra após INACTIVE ajuda a
+        # limpar assinaturas de homologação sem relaxar a proteção da produção.
+        if _asaas_is_sandbox():
+            try:
+                client.update_subscription(subscription_id, {"status": "INACTIVE"})
+                try:
+                    client.delete_subscription(subscription_id)
+                    return {
+                        "removed": True,
+                        "already_absent": False,
+                        "sandbox_recovered": True,
+                    }
+                except AsaasAPIError as retry_exc:
+                    if _asaas_subscription_missing(retry_exc):
+                        return {
+                            "removed": True,
+                            "already_absent": True,
+                            "sandbox_recovered": True,
+                        }
+                    raise retry_exc
+            except AsaasAPIError as sandbox_exc:
+                if _asaas_subscription_missing(sandbox_exc):
+                    return {
+                        "removed": True,
+                        "already_absent": True,
+                        "sandbox_recovered": True,
+                    }
+                raise sandbox_exc
+
+        raise first_exc
 
 
 def _payment_is_paid(payment: Optional[Dict[str, Any]]) -> bool:
@@ -1533,24 +1688,42 @@ def create_subscription(
             }
 
         try:
-            client.delete_subscription(existing_subscription_id)
+            removal = _remove_subscription_for_replacement(client, existing_subscription_id)
         except AsaasAPIError as exc:
+            db.rollback()
             raise HTTPException(
                 status_code=502,
                 detail={
+                    "code": "previous_subscription_cancel_failed",
                     "message": "Não foi possível cancelar a assinatura anterior. A nova cobrança não foi criada para evitar cobrança duplicada.",
-                    "asaas_status": exc.status_code, "asaas_payload": exc.payload,
+                    "asaas_status": exc.status_code,
+                    "asaas_payload": exc.payload,
+                    "subscription_id": existing_subscription_id,
                 },
             )
 
+        # A remoção é idempotente. Se o Asaas disser que a assinatura já não
+        # existe, limpamos o ID local obsoleto e seguimos normalmente.
         _update_billing_fields(
             db, empresa_id,
             asaas_subscription_id=None,
             asaas_last_payment_id=None,
             asaas_billing_type=None,
+            billing_plan_pending=None,
             billing_status="cancelled",
         )
         db.flush()
+
+        if removal.get("already_absent"):
+            print(
+                f"[BILLING][ASAAS] assinatura local obsoleta limpa "
+                f"empresa={empresa_id} subscription={existing_subscription_id}"
+            )
+        elif removal.get("sandbox_recovered"):
+            print(
+                f"[BILLING][ASAAS] assinatura Sandbox inativada/removida para novo teste "
+                f"empresa={empresa_id} subscription={existing_subscription_id}"
+            )
 
     try:
         customer_id = _ensure_asaas_customer(db, emp, client)
@@ -1658,11 +1831,50 @@ def create_subscription(
     try:
         subscription = client.create_subscription(payload)
     except AsaasAPIError as exc:
-        db.rollback()
-        raise HTTPException(
-            status_code=400 if exc.status_code < 500 else 502,
-            detail={"message": str(exc), "asaas_status": exc.status_code, "asaas_payload": exc.payload},
-        )
+        if _asaas_customer_missing(exc):
+            # Proteção extra contra corrida/ID obsoleto: se o Asaas recusar o
+            # customer no momento exato de criar a assinatura, reconstruímos
+            # o vínculo uma única vez e repetimos a criação.
+            _update_billing_fields(
+                db,
+                empresa_id,
+                asaas_customer_id=None,
+                billing_status="customer_missing",
+            )
+            db.flush()
+            try:
+                customer_id = _ensure_asaas_customer(db, emp, client)
+                payload["customer"] = customer_id
+                subscription = client.create_subscription(payload)
+                print(
+                    f"[BILLING][ASAAS] cliente Asaas reconstruído automaticamente "
+                    f"empresa={empresa_id} customer={customer_id}"
+                )
+            except HTTPException:
+                db.rollback()
+                raise
+            except AsaasAPIError as retry_exc:
+                db.rollback()
+                if _asaas_reports_invalid_document(retry_exc):
+                    raise HTTPException(
+                        status_code=422,
+                        detail=_company_document_detail(emp),
+                    )
+                raise HTTPException(
+                    status_code=400 if retry_exc.status_code < 500 else 502,
+                    detail={
+                        "code": "asaas_customer_recovery_failed",
+                        "message": str(retry_exc),
+                        "asaas_status": retry_exc.status_code,
+                        "asaas_payload": retry_exc.payload,
+                    },
+                )
+        else:
+            db.rollback()
+            raise HTTPException(
+                status_code=400 if exc.status_code < 500 else 502,
+                detail={"message": str(exc), "asaas_status": exc.status_code, "asaas_payload": exc.payload},
+            )
 
     subscription_id = str(subscription.get("id") or "").strip()
     if not subscription_id:
