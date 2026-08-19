@@ -634,3 +634,41 @@ a{color:inherit;text-decoration:none}
   .save-state{width:100%;justify-content:center}
   .toast-message{left:12px;right:12px;bottom:12px;max-width:none}
 }
+
+/* Integração segura com Valora CRM */
+.valora-integration-panel .panel-head{margin-bottom:14px}
+.integration-status{
+  display:inline-flex;align-items:center;min-height:28px;padding:0 10px;border:1px solid var(--zc-border);
+  border-radius:999px;background:var(--zc-surface-2);color:var(--zc-muted);font-size:11px;font-weight:650;white-space:nowrap
+}
+.integration-status.is-connected{background:var(--zc-green-soft);border-color:transparent;color:var(--zc-green)}
+.integration-status.is-restricted{background:var(--zc-amber-soft);border-color:transparent;color:var(--zc-amber)}
+.integration-safe-note{
+  display:flex;gap:11px;align-items:flex-start;padding:13px 14px;border:1px solid var(--zc-border);border-radius:14px;background:var(--zc-surface-2)
+}
+.integration-safe-note>i{margin-top:2px;color:var(--zc-green);font-size:15px}
+.integration-safe-note>div{display:flex;flex-direction:column;gap:3px;min-width:0}
+.integration-safe-note strong{color:var(--zc-title);font-size:12px;font-weight:650}
+.integration-safe-note span{color:var(--zc-muted);font-size:11.5px;line-height:1.5}
+.integration-connected{
+  margin-top:12px;display:flex;align-items:center;justify-content:space-between;gap:14px;padding:14px;border:1px solid var(--zc-border);border-radius:14px;background:var(--zc-green-soft)
+}
+.integration-connected[hidden]{display:none!important}
+.integration-connected-copy{display:flex;flex-direction:column;gap:3px;min-width:0}
+.integration-connected-copy small{color:var(--zc-green);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em}
+.integration-connected-copy strong{color:var(--zc-title);font-size:13px;font-weight:680}
+.integration-connected-copy span{color:var(--zc-muted);font-size:11px}
+.btn-danger-soft{border:1px solid rgba(229,72,77,.18);background:var(--zc-danger-soft);color:var(--zc-danger)}
+.btn-danger-soft:hover{filter:brightness(.98)}
+.pairing-flow{display:grid;grid-template-columns:minmax(0,1fr) 250px;gap:14px;margin-top:14px;align-items:stretch}
+.pairing-steps{display:flex;flex-direction:column;gap:9px;padding:14px;border:1px solid var(--zc-border);border-radius:14px;background:var(--zc-surface)}
+.pairing-steps span{display:flex;align-items:center;gap:8px;color:var(--zc-muted);font-size:11.5px;line-height:1.45}
+.pairing-steps b{width:23px;height:23px;flex:0 0 23px;display:grid;place-items:center;border-radius:50%;background:var(--zc-brand-soft);color:var(--zc-brand);font-size:10px}
+.pairing-code-card{display:flex;flex-direction:column;justify-content:center;align-items:center;gap:7px;padding:14px;border:1px solid var(--zc-border);border-radius:14px;background:var(--zc-surface-2);text-align:center}
+.pairing-code-card[hidden]{display:none!important}
+.pairing-code-card small{color:var(--zc-muted);font-size:10px;text-transform:uppercase;letter-spacing:.05em;font-weight:650}
+.pairing-code-card>strong{color:var(--zc-title);font-size:25px;letter-spacing:.12em;font-weight:700;font-variant-numeric:tabular-nums}
+.pairing-code-card>span{color:var(--zc-muted);font-size:10.5px}
+.pairing-code-card .btn{margin-top:3px}
+.integration-actions{margin-top:14px}
+@media(max-width:760px){.pairing-flow{grid-template-columns:1fr}.integration-connected{align-items:flex-start;flex-direction:column}.integration-connected .btn{width:100%}}

@@ -3308,8 +3308,8 @@
 
         renderPaymentResult(data);
 
-        const statusData = await refreshStatus(false);
-        if (String(statusData?.billing?.billing_status || "").toLowerCase() !== "active") {
+        const statusData = await refreshStatus(false, false);
+        if (!checkoutPlanIsActive(statusData)) {
           startPolling();
         }
 
@@ -3343,17 +3343,20 @@
       }
 
       try {
-        const data = await apiPost("/api/billing/asaas/sandbox/confirm-payment", {});
-        state.status = data;
-        renderStatus(data);
-        renderPaymentResult(data);
+        await apiPost("/api/billing/asaas/sandbox/confirm-payment", {});
 
-        if (state.polling) {
-          clearInterval(state.polling);
-          state.polling = null;
+        if ($("#paymentStatusText")) {
+          $("#paymentStatusText").textContent = "Aguardando webhook";
+        }
+        setPaymentAlert("ok", "Pagamento confirmado no Asaas. Aguardando o webhook liberar o plano.");
+
+        if (btn) {
+          btn.disabled = true;
+          btn.textContent = "Aguardando webhook...";
         }
 
-        toast("Pagamento de teste confirmado e plano liberado");
+        toast("Pagamento confirmado no Asaas. Aguardando webhook.");
+        startPolling();
       } catch (err) {
         console.error(err);
         if ($("#paymentStatusText")) {
@@ -3368,6 +3371,22 @@
       }
     }
 
+    function checkoutPlanIsActive(data) {
+      const selected = String(state.selectedPlan?.code || "").toUpperCase();
+      if (!selected) return false;
+
+      const effective = String(
+        data?.plan_status?.effective_tier
+        || data?.assinatura
+        || ""
+      ).toUpperCase();
+
+      const paidActive = Boolean(data?.plan_status?.paid?.active);
+      const billingStatus = String(data?.billing?.billing_status || "").toLowerCase();
+
+      return effective === selected && (paidActive || billingStatus === "active");
+    }
+
     function renderPaymentResult(data) {
       const result = $("#paymentResult");
       result.className = "result show";
@@ -3376,7 +3395,7 @@
       const invoiceUrl = data?.payment?.invoiceUrl || data?.subscription?.invoiceUrl || "";
       const bankSlipUrl = data?.payment?.bankSlipUrl || "";
 
-      if (data?.credited || data?.already_active || String(data?.billing?.billing_status || "").toLowerCase() === "active") {
+      if (data?.credited || data?.already_active || checkoutPlanIsActive(data)) {
         if ($("#paymentStatusText")) $("#paymentStatusText").textContent = "Pagamento confirmado";
         result.innerHTML = `
           <div class="card-result">
@@ -3520,21 +3539,18 @@
       toast("Pagamento confirmado e plano liberado");
 
       const destination = safePostPaymentDestination();
-      window.setTimeout(() => {
-        if (destination) {
+      if (destination) {
+        window.setTimeout(() => {
           location.assign(destination);
-          return;
-        }
-        closeCheckout();
-      }, 1200);
+        }, 1200);
+      }
     }
 
     async function refreshStatus(showToast = true, synchronize = true) {
       const data = await loadStatus(synchronize);
       renderStatus(data);
 
-      const billingStatus = String(data?.billing?.billing_status || "").toLowerCase();
-      const isActive = billingStatus === "active" || Boolean(data?.plan_status?.paid?.active);
+      const isActive = checkoutPlanIsActive(data);
 
       if (isActive) {
         renderPaymentResult({
@@ -3567,7 +3583,7 @@
 
       state.polling = setInterval(async () => {
         try {
-          await refreshStatus(false, true);
+          await refreshStatus(false, false);
         } catch (_) {}
       }, 10000);
     }

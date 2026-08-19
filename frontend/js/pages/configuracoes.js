@@ -11,7 +11,9 @@
   const state = {
     summary: null,
     reportBusy: false,
-    securityBusy: false
+    securityBusy: false,
+    valoraBusy: false,
+    valoraIntegration: null
   };
 
   const $ = (selector, root = document) => root.querySelector(selector);
@@ -388,6 +390,7 @@
     }
 
     renderReports(state.summary.relatos || []);
+    if (!identity.is_admin) renderValoraIntegration({ pareado: false });
   }
 
   async function loadSummary({ quiet = false } = {}) {
@@ -437,6 +440,110 @@
       } finally {
         state.securityBusy = false;
         input.disabled = !state.summary?.identity?.can_edit_security;
+      }
+    });
+  }
+
+  function renderValoraIntegration(data) {
+    state.valoraIntegration = data || null;
+    const status = $('#valora-integration-status');
+    const connectedBox = $('#valora-connected-box');
+    const company = $('#valora-connected-company');
+    const lastUse = $('#valora-connected-last-use');
+    const generate = $('#btn-gerar-codigo-valora');
+    const revoke = $('#btn-revogar-valora');
+    const isAdmin = Boolean(state.summary?.identity?.is_admin);
+    const paired = Boolean(data?.pareado);
+
+    if (status) {
+      status.classList.toggle('is-connected', paired);
+      status.classList.toggle('is-restricted', !isAdmin);
+      status.textContent = !isAdmin ? 'Somente administrador' : (paired ? 'Conectado' : 'Não conectado');
+    }
+    if (connectedBox) connectedBox.hidden = !paired;
+    if (company) company.textContent = data?.valora_empresa_nome || 'Valora CRM';
+    if (lastUse) lastUse.textContent = data?.ultimo_uso_em ? `Último uso: ${formatDate(data.ultimo_uso_em)}` : 'Aguardando primeiro uso';
+    if (generate) generate.disabled = !isAdmin || state.valoraBusy;
+    if (revoke) revoke.disabled = !isAdmin || state.valoraBusy;
+  }
+
+  async function loadValoraIntegration({ quiet = false } = {}) {
+    const isAdmin = Boolean(state.summary?.identity?.is_admin);
+    if (!isAdmin) {
+      renderValoraIntegration({ pareado: false });
+      return null;
+    }
+    try {
+      const data = await api('/api/integracoes/valora/admin/status');
+      renderValoraIntegration(data);
+      return data;
+    } catch (error) {
+      const status = $('#valora-integration-status');
+      if (status) {
+        status.textContent = 'Falha ao verificar';
+        status.classList.add('is-restricted');
+      }
+      if (!quiet) showToast(error?.message || 'Não foi possível verificar a integração com o Valora.', true);
+      return null;
+    }
+  }
+
+  function bindValoraIntegration() {
+    const generate = $('#btn-gerar-codigo-valora');
+    const copy = $('#btn-copiar-codigo-valora');
+    const revoke = $('#btn-revogar-valora');
+
+    generate?.addEventListener('click', async () => {
+      if (state.valoraBusy || !state.summary?.identity?.is_admin) return;
+      state.valoraBusy = true;
+      generate.disabled = true;
+      const original = generate.innerHTML;
+      generate.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i><span>Gerando…</span>';
+      try {
+        const data = await api('/api/integracoes/valora/admin/codigo-pareamento', { method: 'POST' });
+        const card = $('#pairing-code-card');
+        const code = $('#valora-pairing-code');
+        const expiry = $('#valora-pairing-expiry');
+        if (code) code.textContent = String(data.codigo || '').replace(/(\d{4})(\d{4})/, '$1 $2');
+        if (expiry) expiry.textContent = data.expira_em ? `Expira ${formatDate(data.expira_em)}` : 'Expira em 10 minutos';
+        if (card) card.hidden = false;
+        showToast('Código gerado. Agora cole-o no Valora CRM.');
+      } catch (error) {
+        showToast(error?.message || 'Não foi possível gerar o código.', true);
+      } finally {
+        state.valoraBusy = false;
+        generate.disabled = false;
+        generate.innerHTML = original;
+      }
+    });
+
+    copy?.addEventListener('click', async () => {
+      const raw = String($('#valora-pairing-code')?.textContent || '').replace(/\D/g, '');
+      if (!raw) return;
+      try {
+        await navigator.clipboard.writeText(raw);
+        showToast('Código copiado.');
+      } catch (_) {
+        showToast('Não foi possível copiar automaticamente.', true);
+      }
+    });
+
+    revoke?.addEventListener('click', async () => {
+      if (state.valoraBusy || !state.summary?.identity?.is_admin) return;
+      if (!confirm('Desconectar o Valora desta empresa? As cobranças por WhatsApp deixarão de ser enviadas até um novo pareamento.')) return;
+      state.valoraBusy = true;
+      revoke.disabled = true;
+      try {
+        await api('/api/integracoes/valora/admin/conexao', { method: 'DELETE' });
+        const card = $('#pairing-code-card');
+        if (card) card.hidden = true;
+        showToast('Integração com o Valora desconectada.');
+        await loadValoraIntegration({ quiet: true });
+      } catch (error) {
+        showToast(error?.message || 'Não foi possível desconectar o Valora.', true);
+      } finally {
+        state.valoraBusy = false;
+        revoke.disabled = false;
       }
     });
   }
@@ -517,8 +624,10 @@
     bindTheme();
     bindNotifications();
     bindSecurity();
+    bindValoraIntegration();
     bindReportForm();
     await loadSummary();
+    await loadValoraIntegration({ quiet: true });
   }
 
   if (document.readyState === 'loading') {

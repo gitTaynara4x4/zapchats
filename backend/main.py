@@ -65,6 +65,7 @@ from backend.routers.perfil import router as perfil_router
 from backend.routers.meu_plano import router as meu_plano_router
 from backend.routers.configuracoes import router as configuracoes_router
 from backend.routers.integracoes_valora import router as integracoes_valora_router
+from backend.routers.integracoes_valora_api import router as integracoes_valora_api_router
 
 # ✅ Router de filas
 from backend.routers import filas as filas_router
@@ -80,6 +81,7 @@ from backend.migrations.user_onboarding import ensure_user_onboarding
 from backend.migrations.fila_retorno_inatividade import ensure_fila_retorno_inatividade
 from backend.migrations.atendimento_historico_performance import ensure_atendimento_historico_performance
 from backend.migrations.billing_asaas_schema import ensure_billing_asaas_schema
+from backend.migrations.valora_integration import ensure_valora_integration_schema
 from backend.services.fila_atendimento_runtime import start_fila_timeout_worker, stop_fila_timeout_worker
 
 # Integrações Evolution
@@ -1130,6 +1132,7 @@ app.include_router(clientes.router, prefix="/api", tags=["Clientes"])
 app.include_router(atendimento_conversas_router, prefix="/api/atendimento")
 app.include_router(atendimento.router, prefix="/api/atendimento", tags=["Atendimento"])
 app.include_router(integracoes_valora_router, prefix="/api/atendimento", tags=["Integrações - Valora"])
+app.include_router(integracoes_valora_api_router)
 
 app.include_router(email_router)
 app.include_router(disparos_router)
@@ -1569,6 +1572,7 @@ async def _start_integrations():
             ensure_fila_retorno_inatividade(engine, LOG)
             ensure_atendimento_historico_performance(engine, LOG)
             ensure_billing_asaas_schema(engine, LOG)
+            ensure_valora_integration_schema(engine, LOG)
             db_ok = True
             LOG("[STARTUP] DB ok e tabelas garantidas.")
             break

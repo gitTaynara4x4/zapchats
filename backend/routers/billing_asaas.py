@@ -1572,37 +1572,24 @@ def confirm_sandbox_payment(
             },
         )
 
-    credited, _ = _activate_payment_once(
-        db,
-        emp,
-        plan,
-        payment_id,
-        subscription_id,
-        payment_status,
-        f"sandbox-confirm:{payment_id}:{payment_status}",
-    )
-    db.add(emp)
+    # IMPORTANTE: no Sandbox este endpoint APENAS confirma a cobrança no Asaas.
+    # Ele não credita dias, não troca o plano e não marca billing_status como active.
+    # A ativação local deve acontecer exclusivamente quando o Asaas entregar
+    # PAYMENT_CONFIRMED/PAYMENT_RECEIVED em /api/billing/asaas/webhook.
+    db.rollback()
 
-    _update_billing_fields(
-        db,
-        empresa_id,
-        billing_provider="asaas",
-        billing_status="active",
-        billing_plan_pending=plan,
-        asaas_last_payment_id=payment_id,
-        asaas_subscription_id=subscription_id,
-        asaas_billing_type=billing_type,
+    print(
+        f"[BILLING][ASAAS][SANDBOX] pagamento confirmado no Asaas; "
+        f"aguardando webhook empresa={empresa_id} payment={payment_id} "
+        f"subscription={subscription_id} status={payment_status}"
     )
-    db.commit()
-    db.refresh(emp)
 
-    extras = _payment_extras(client, billing_type or "", payment_id)
     return {
-        **_status_response(db, emp),
         "ok": True,
         "sandbox_simulated": True,
-        "credited": credited,
-        "message": "Pagamento de teste confirmado e plano liberado.",
+        "webhook_only": True,
+        "credited": False,
+        "message": "Pagamento de teste confirmado no Asaas. Aguardando confirmação pelo webhook.",
         "plan": plan,
         "plan_name": _plan_name(plan),
         "amount": (payment or {}).get("value") or _plan_amount(plan),
@@ -1610,7 +1597,6 @@ def confirm_sandbox_payment(
         "subscription_id": subscription_id,
         "payment": payment,
         "sandbox_confirmation": confirmation,
-        **extras,
     }
 
 
@@ -1646,11 +1632,16 @@ def create_subscription(
             or (existing_payment or {}).get("billingType")
             or ""
         ).upper()
-        same_plan = normalize_plan(row.get("billing_plan_pending")) == plan
+        current_plan = normalize_plan(getattr(emp, "assinatura", None))
+        same_plan = current_plan == plan
         same_type = not existing_type or existing_type == billing_type
         current_billing_status = str(row.get("billing_status") or "").lower()
 
         if same_plan and _has_unexpired_paid_access(emp):
+            print(
+                f"[BILLING][ASAAS] plano solicitado já é o plano ativo "
+                f"empresa={empresa_id} plan={plan} subscription={existing_subscription_id}"
+            )
             return {
                 "ok": True, "already_active": True,
                 "message": "Sua assinatura já está ativa e será renovada automaticamente a cada pagamento mensal.",
@@ -1755,6 +1746,33 @@ def create_subscription(
         customer_id=customer_id,
         external_reference=external_ref,
     )
+
+    current_plan = normalize_plan(getattr(emp, "assinatura", None))
+    if recovered_subscription and _asaas_is_sandbox() and current_plan != plan:
+        recovered_id_for_cleanup = str(recovered_subscription.get("id") or "").strip()
+        if recovered_id_for_cleanup:
+            try:
+                cleanup = _remove_subscription_for_replacement(client, recovered_id_for_cleanup)
+                print(
+                    f"[BILLING][ASAAS][SANDBOX] assinatura antiga do plano-alvo removida "
+                    f"para gerar cobrança nova empresa={empresa_id} "
+                    f"current_plan={current_plan} target_plan={plan} "
+                    f"subscription={recovered_id_for_cleanup} cleanup={cleanup}"
+                )
+                recovered_subscription = None
+            except AsaasAPIError as exc:
+                db.rollback()
+                raise HTTPException(
+                    status_code=502,
+                    detail={
+                        "code": "sandbox_stale_target_subscription_cleanup_failed",
+                        "message": "Não foi possível limpar uma assinatura antiga de teste do plano selecionado.",
+                        "asaas_status": exc.status_code,
+                        "asaas_payload": exc.payload,
+                        "subscription_id": recovered_id_for_cleanup,
+                    },
+                )
+
     if recovered_subscription:
         recovered_id = str(recovered_subscription.get("id") or "").strip()
         payments = _subscription_payments(client, recovered_id) if recovered_id else []
@@ -1960,6 +1978,12 @@ async def asaas_webhook(
 
     event_id = str(payload.get("id") or "").strip()
 
+    print(
+        f"[BILLING][ASAAS][WEBHOOK] recebido event={event or '-'} "
+        f"payment={payment_id or '-'} subscription={subscription_id or '-'} "
+        f"status={status or '-'}"
+    )
+
     if not event_id:
         event_id = f"{event}:{payment_id or '-'}:{status}:{_event_fingerprint(payload)}"
 
@@ -2002,6 +2026,10 @@ async def asaas_webhook(
             asaas_billing_type=billing_type or existing_row.get("asaas_billing_type"),
         )
         db.commit()
+        print(
+            f"[BILLING][ASAAS][WEBHOOK] pagamento processado empresa={int(emp.id)} "
+            f"plan={plan} payment={payment_id or '-'} status={status or '-'} credited={credited}"
+        )
         return {
             "ok": True,
             "processed": "plan_activated" if credited else "payment_already_credited",

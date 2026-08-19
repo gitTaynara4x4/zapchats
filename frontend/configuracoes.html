@@ -26,7 +26,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
 
-  <link rel="stylesheet" href="/frontend/css/configuracoes.css?v=20260731-configuracoes-v3" />
+  <link rel="stylesheet" href="/frontend/css/configuracoes.css?v=20260818-valora-integration-v1" />
   <link rel="stylesheet" href="/frontend/css/dashboard-onboarding.css?v=20260727-onboarding-v2">
 </head>
 <body>
@@ -189,6 +189,51 @@
           </div>
         </article>
 
+
+        <article class="panel settings-panel valora-integration-panel" id="valora-integration-panel">
+          <div class="panel-head">
+            <div>
+              <span class="panel-kicker">Integrações</span>
+              <h2>Valora CRM</h2>
+              <p>Autorize o Valora a usar os WhatsApps desta empresa para cobranças automáticas, sem compartilhar sua senha do ZapsChat.</p>
+            </div>
+            <span class="integration-status" id="valora-integration-status">Verificando…</span>
+          </div>
+
+          <div class="integration-safe-note">
+            <i class="fa-solid fa-shield-halved" aria-hidden="true"></i>
+            <div><strong>Conexão segura por empresa</strong><span>O código abaixo só conecta o Valora a esta empresa. O Valora não poderá usar números de outra empresa.</span></div>
+          </div>
+
+          <div class="integration-connected" id="valora-connected-box" hidden>
+            <div class="integration-connected-copy">
+              <small>Valora conectado</small>
+              <strong id="valora-connected-company">—</strong>
+              <span id="valora-connected-last-use">Aguardando primeiro uso</span>
+            </div>
+            <button class="btn btn-danger-soft" type="button" id="btn-revogar-valora">Desconectar Valora</button>
+          </div>
+
+          <div class="pairing-flow">
+            <div class="pairing-steps">
+              <span><b>1</b> Clique em <strong>Gerar código</strong>.</span>
+              <span><b>2</b> No Valora, abra <strong>Financeiro → Cobrança → Configurar WhatsApp</strong>.</span>
+              <span><b>3</b> Digite o código e escolha a instância que será usada para cobrança.</span>
+            </div>
+            <div class="pairing-code-card" id="pairing-code-card" hidden>
+              <small>Código temporário</small>
+              <strong id="valora-pairing-code">00000000</strong>
+              <span id="valora-pairing-expiry">Expira em 10 minutos</span>
+              <button class="btn btn-secondary" type="button" id="btn-copiar-codigo-valora"><i class="fa-regular fa-copy"></i> Copiar código</button>
+            </div>
+          </div>
+
+          <div class="form-actions integration-actions">
+            <span class="form-note"><i class="fa-solid fa-circle-info"></i> Gerar um código não desconecta uma integração já ativa. A troca só acontece quando o novo código for usado no Valora.</span>
+            <button class="btn btn-primary" type="button" id="btn-gerar-codigo-valora"><i class="fa-solid fa-link"></i><span>Gerar código de conexão</span></button>
+          </div>
+        </article>
+
         <article class="panel settings-panel" id="report-panel">
           <div class="panel-head">
             <div>
@@ -304,7 +349,7 @@
   </div>
 
   <script src="/frontend/js/page-guard.js" defer></script>
-  <script src="/frontend/js/pages/configuracoes.js?v=20260731-configuracoes-v3" defer></script>
+  <script src="/frontend/js/pages/configuracoes.js?v=20260818-valora-integration-v1" defer></script>
   <script src="/frontend/js/help/help-configuracoes.js?v=20260731-configuracoes-v3" defer></script>
   <script src="/frontend/js/pages/dashboard-onboarding.js?v=20260727-onboarding-v2" defer></script>
 </body>
