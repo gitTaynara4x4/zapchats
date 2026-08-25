@@ -12,6 +12,8 @@ from sqlalchemy.exc import IntegrityError
 from backend.database import SessionLocal
 from backend import models
 
+from ..repositories.clientes_repo import upsert_cliente_repo
+
 from ..parsers.message_parser import (
     extract_media_meta,
     extract_messages_any_shape,
@@ -146,53 +148,22 @@ def _upsert_cliente_local(
     nome: str | None,
     nome_whatsapp: str | None,
     avatar_url: str | None = None,
+    self_profile_name: str | None = None,
+    allow_self_name_repair: bool = False,
 ) -> int | None:
-    cli = (
-        db.query(models.Cliente)
-        .filter(
-            models.Cliente.empresa_id == int(empresa_id),
-            models.Cliente.telefone == str(telefone),
-        )
-        .first()
+    # Usa a regra canônica de cliente para não sobrescrever nome manual e
+    # para permitir reparar apenas o vazamento conhecido do nome da instância.
+    return upsert_cliente_repo(
+        db,
+        empresa_id=int(empresa_id),
+        instancia_id=int(instancia_id),
+        telefone_raw=telefone,
+        nome=nome,
+        nome_whatsapp=nome_whatsapp,
+        avatar_url=avatar_url,
+        self_profile_name=self_profile_name,
+        allow_self_name_repair=bool(allow_self_name_repair),
     )
-
-    nome_final = (nome or nome_whatsapp or formatar_telefone_br(telefone)).strip()
-
-    if not cli:
-        cli = models.Cliente(
-            empresa_id=int(empresa_id),
-            telefone=str(telefone),
-            nome=nome_final,
-            nome_whatsapp=(nome_whatsapp or nome_final),
-            avatar_url=avatar_url,
-            instancia_id=int(instancia_id),
-        )
-        db.add(cli)
-        db.flush()
-        return int(cli.id)
-
-    changed = False
-
-    if getattr(cli, "instancia_id", None) is None:
-        cli.instancia_id = int(instancia_id)
-        changed = True
-
-    if nome_whatsapp and getattr(cli, "nome_whatsapp", None) != nome_whatsapp:
-        cli.nome_whatsapp = nome_whatsapp
-        changed = True
-
-    if nome_final and getattr(cli, "nome", None) != nome_final:
-        cli.nome = nome_final
-        changed = True
-
-    if avatar_url and getattr(cli, "avatar_url", None) != avatar_url:
-        cli.avatar_url = avatar_url
-        changed = True
-
-    if changed:
-        db.flush()
-
-    return int(cli.id)
 
 
 def _find_existing_msg_11(
@@ -414,14 +385,19 @@ async def run_history_sync(inst_name: str, payload: dict | list) -> int:
                     if msg_id and _find_existing_msg_11(db, instancia_id=instancia_id, msg_id=str(msg_id)):
                         continue
 
+                    contact_push_name = None if from_me else (m.get("pushName") or m.get("senderName"))
+                    self_profile_name = str(getattr(inst, "perfil_nome_whatsapp", None) or "").strip() or None
+
                     cli_id = _upsert_cliente_local(
                         db,
                         empresa_id=empresa_id,
                         instancia_id=instancia_id,
                         telefone=telefone,
-                        nome=formatar_telefone_br(telefone),
-                        nome_whatsapp=(m.get("pushName") or m.get("senderName")),
+                        nome=(contact_push_name or formatar_telefone_br(telefone)),
+                        nome_whatsapp=contact_push_name,
                         avatar_url=None,
+                        self_profile_name=self_profile_name,
+                        allow_self_name_repair=bool(contact_push_name),
                     )
                     if not cli_id:
                         continue

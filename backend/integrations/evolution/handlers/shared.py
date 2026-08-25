@@ -419,6 +419,8 @@ def upsert_cliente(
     nome: str | None = None,
     nome_whatsapp: str | None = None,
     avatar_url: str | None = None,
+    self_profile_name: str | None = None,
+    allow_self_name_repair: bool = False,
 ) -> int | None:
     return upsert_cliente_repo(
         db,
@@ -428,6 +430,8 @@ def upsert_cliente(
         nome=nome,
         nome_whatsapp=nome_whatsapp,
         avatar_url=avatar_url,
+        self_profile_name=self_profile_name,
+        allow_self_name_repair=bool(allow_self_name_repair),
     )
 
 

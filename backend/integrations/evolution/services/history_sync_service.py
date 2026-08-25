@@ -289,6 +289,12 @@ async def process_messages_set(inst_id: str, data) -> int:
                         _log_ctx("[HIST][skip] telefone inválido/eco", idx=idx, msg_id=msg_id, telefone=telefone)
                         continue
 
+                    # Em mensagens fromMe=true, push_name pertence ao perfil
+                    # da própria instância. Só mensagens recebidas podem fornecer
+                    # nome da contraparte por esse campo.
+                    contact_push_name = None if from_me else parsed.get("push_name")
+                    self_profile_name = str(getattr(inst, "perfil_nome_whatsapp", None) or "").strip() or None
+
                     cli_id = await _retry_deadlock(
                         db,
                         lambda: upsert_cliente_repo(
@@ -296,9 +302,11 @@ async def process_messages_set(inst_id: str, data) -> int:
                             empresa_id=empresa_id,
                             instancia_id=inst.id,
                             telefone_raw=telefone,
-                            nome=(parsed.get("push_name") or formatar_telefone_br(telefone)),
-                            nome_whatsapp=(parsed.get("push_name") or formatar_telefone_br(telefone)),
+                            nome=(contact_push_name or formatar_telefone_br(telefone)),
+                            nome_whatsapp=contact_push_name,
                             avatar_url=None,
+                            self_profile_name=self_profile_name,
+                            allow_self_name_repair=bool(contact_push_name),
                         ),
                     )
                     if not cli_id:

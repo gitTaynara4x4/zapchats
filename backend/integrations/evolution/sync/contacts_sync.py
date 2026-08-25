@@ -7,6 +7,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 from backend.database import SessionLocal
 from backend import models
+from ..repositories.clientes_repo import upsert_cliente_repo
 from ..parsers.contact_parser import extract_contacts_any_shape
 from ..transport.evolution_http_client import evo_find_contacts
 from ..transport.websocket_emitters import (
@@ -106,53 +107,19 @@ def _upsert_cliente_local(
     nome: str | None,
     nome_whatsapp: str | None,
     avatar_url: str | None,
+    self_profile_name: str | None = None,
 ) -> int | None:
-    cli = (
-        db.query(models.Cliente)
-        .filter(
-            models.Cliente.empresa_id == int(empresa_id),
-            models.Cliente.telefone == str(telefone),
-        )
-        .first()
+    return upsert_cliente_repo(
+        db,
+        empresa_id=int(empresa_id),
+        instancia_id=int(instancia_id),
+        telefone_raw=telefone,
+        nome=nome,
+        nome_whatsapp=nome_whatsapp,
+        avatar_url=avatar_url,
+        self_profile_name=self_profile_name,
+        allow_self_name_repair=bool(nome_whatsapp),
     )
-
-    nome_final = (nome or nome_whatsapp or formatar_telefone_br(telefone)).strip()
-
-    if not cli:
-        cli = models.Cliente(
-            empresa_id=int(empresa_id),
-            telefone=str(telefone),
-            nome=nome_final,
-            nome_whatsapp=(nome_whatsapp or nome_final),
-            avatar_url=avatar_url,
-            instancia_id=int(instancia_id),
-        )
-        db.add(cli)
-        db.flush()
-        return int(cli.id)
-
-    changed = False
-
-    if getattr(cli, "instancia_id", None) is None:
-        cli.instancia_id = int(instancia_id)
-        changed = True
-
-    if nome_whatsapp and getattr(cli, "nome_whatsapp", None) != nome_whatsapp:
-        cli.nome_whatsapp = nome_whatsapp
-        changed = True
-
-    if nome_final and getattr(cli, "nome", None) != nome_final:
-        cli.nome = nome_final
-        changed = True
-
-    if avatar_url and getattr(cli, "avatar_url", None) != avatar_url:
-        cli.avatar_url = avatar_url
-        changed = True
-
-    if changed:
-        db.flush()
-
-    return int(cli.id)
 
 
 async def sync_contacts_full(inst_name: str) -> int:
@@ -220,6 +187,7 @@ async def sync_contacts_full(inst_name: str) -> int:
                     nome=(nome_push or formatar_telefone_br(telefone)),
                     nome_whatsapp=nome_push,
                     avatar_url=avatar,
+                    self_profile_name=getattr(inst, "perfil_nome_whatsapp", None),
                 )
                 if cli_id:
                     imported += 1

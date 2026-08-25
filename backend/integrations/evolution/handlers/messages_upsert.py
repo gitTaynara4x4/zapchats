@@ -668,6 +668,8 @@ async def _ensure_cliente_id(
     nome: str | None,
     nome_whatsapp: str | None,
     avatar_url: str | None = None,
+    self_profile_name: str | None = None,
+    allow_self_name_repair: bool = False,
 ) -> int | None:
     telefone_db = normalize_phone_for_db(telefone)
     if not telefone_db:
@@ -684,6 +686,8 @@ async def _ensure_cliente_id(
                 nome=nome,
                 nome_whatsapp=nome_whatsapp,
                 avatar_url=avatar_url,
+                self_profile_name=self_profile_name,
+                allow_self_name_repair=bool(allow_self_name_repair),
             ),
         )
     except Exception:
@@ -701,6 +705,8 @@ async def _ensure_cliente_id_fk_safe(
     nome_whatsapp: str | None,
     avatar_url: str | None = None,
     current_cliente_id: int | None = None,
+    self_profile_name: str | None = None,
+    allow_self_name_repair: bool = False,
 ) -> int | None:
     """
     Garante um cliente_id realmente existente na tabela clientes.
@@ -712,6 +718,20 @@ async def _ensure_cliente_id_fk_safe(
     - fallback por telefone_norm dentro da empresa.
     """
     if current_cliente_id and _cliente_exists(db, current_cliente_id, empresa_id=empresa_id):
+        if allow_self_name_repair and nome_whatsapp:
+            refreshed = await _ensure_cliente_id(
+                db,
+                empresa_id=empresa_id,
+                instancia_id=instancia_id,
+                telefone=telefone,
+                nome=nome,
+                nome_whatsapp=nome_whatsapp,
+                avatar_url=avatar_url,
+                self_profile_name=self_profile_name,
+                allow_self_name_repair=True,
+            )
+            if refreshed:
+                return int(refreshed)
         return int(current_cliente_id)
 
     found = _find_cliente_id_by_phone(
@@ -721,6 +741,20 @@ async def _ensure_cliente_id_fk_safe(
         telefone=telefone,
     )
     if found and _cliente_exists(db, found, empresa_id=empresa_id):
+        if allow_self_name_repair and nome_whatsapp:
+            refreshed = await _ensure_cliente_id(
+                db,
+                empresa_id=empresa_id,
+                instancia_id=instancia_id,
+                telefone=telefone,
+                nome=nome,
+                nome_whatsapp=nome_whatsapp,
+                avatar_url=avatar_url,
+                self_profile_name=self_profile_name,
+                allow_self_name_repair=True,
+            )
+            if refreshed:
+                return int(refreshed)
         return int(found)
 
     cli_id = await _ensure_cliente_id(
@@ -731,6 +765,8 @@ async def _ensure_cliente_id_fk_safe(
         nome=nome,
         nome_whatsapp=nome_whatsapp,
         avatar_url=avatar_url,
+        self_profile_name=self_profile_name,
+        allow_self_name_repair=bool(allow_self_name_repair),
     )
     if cli_id and _cliente_exists(db, cli_id, empresa_id=empresa_id):
         return int(cli_id)
@@ -1058,6 +1094,12 @@ def _lid_digits_from_jid(raw: str | None) -> str | None:
     left = s.split("@", 1)[0]
     digits = _only_digits(left)
     return digits or None
+
+
+def _same_name_ci(a: str | None, b: str | None) -> bool:
+    sa = str(a or "").strip().casefold()
+    sb = str(b or "").strip().casefold()
+    return bool(sa and sb and sa == sb)
 
 
 def _bad_push_name(name: str | None, *, raw_lid: str | None = None, telefone: str | None = None) -> bool:
@@ -1934,14 +1976,35 @@ async def on_messages_upsert(inst_id: str, data):
                     continue
 
                 formatted = formatar_telefone_br(telefone)
+                self_profile_name = str(getattr(inst, "perfil_nome_whatsapp", None) or "").strip() or None
+
+                # Em mensagem enviada por nós (fromMe=true), pushName/senderName é o
+                # nome do DONO da instância, não o nome do cliente. Nunca usamos
+                # esse campo como identidade da contraparte.
+                contact_push_name_raw = None if from_me else push_name_raw
 
                 push_name_ok = None
-                if not _bad_push_name(push_name_raw, raw_lid=raw_remote, telefone=telefone):
-                    push_name_ok = str(push_name_raw).strip()
+                if not _bad_push_name(contact_push_name_raw, raw_lid=raw_remote, telefone=telefone):
+                    push_name_ok = str(contact_push_name_raw).strip()
 
                 identity_name_ok = None
-                if not _bad_push_name(identity_push_name, raw_lid=raw_remote, telefone=telefone):
+                # Para mensagem de SAÍDA não usamos push_name de identidade como
+                # fonte de nome. Identidades antigas podem ter sido contaminadas
+                # pelo nome do próprio WhatsApp (ex.: "Taynara") e o cache do
+                # perfil pode estar como "Eu", tornando a comparação insuficiente.
+                # Cliente existente preserva o nome já salvo; cliente novo nasce
+                # com o telefone e será enriquecido quando chegar dado recebido.
+                if not from_me and not _bad_push_name(identity_push_name, raw_lid=raw_remote, telefone=telefone):
                     identity_name_ok = str(identity_push_name).strip()
+
+                # Em mensagem recebida, ainda eliminamos uma identidade antiga
+                # igual ao perfil próprio quando o pushName recebido não confirma.
+                if (
+                    identity_name_ok
+                    and _same_name_ci(identity_name_ok, self_profile_name)
+                    and not (push_name_ok and _same_name_ci(push_name_ok, self_profile_name))
+                ):
+                    identity_name_ok = None
 
                 nome_final = push_name_ok or identity_name_ok or formatted
                 avatar_final = identity_avatar_url or avatar_from_contact_like(m)
@@ -1973,6 +2036,8 @@ async def on_messages_upsert(inst_id: str, data):
                     nome_whatsapp=nome_whatsapp,
                     avatar_url=avatar_final,
                     current_cliente_id=None,
+                    self_profile_name=self_profile_name,
+                    allow_self_name_repair=bool((not from_me) and push_name_ok),
                 )
 
                 if not cli_id:
@@ -2065,6 +2130,8 @@ async def on_messages_upsert(inst_id: str, data):
                     nome_whatsapp=nome_whatsapp,
                     avatar_url=avatar_final,
                     current_cliente_id=cli_id,
+                    self_profile_name=self_profile_name,
+                    allow_self_name_repair=bool((not from_me) and push_name_ok),
                 )
                 if not cli_id:
                     _log_skip(
@@ -2479,6 +2546,28 @@ async def on_messages_upsert(inst_id: str, data):
 
                         conv_key_cliente = f"c:{int(cli_id)}:{int(inst.id or 0)}"
 
+                        # Eco/confirmação de mensagem enviada pelo ZapsChat: usa o
+                        # contexto gravado na própria mensagem, nunca o responsável
+                        # cadastrado no cliente como se ele fosse o autor do envio.
+                        msg_context = None
+                        if msg_db_id:
+                            try:
+                                msg_context = (
+                                    db.query(models.Mensagem)
+                                    .filter(
+                                        models.Mensagem.id == int(msg_db_id),
+                                        models.Mensagem.empresa_id == int(empresa_id),
+                                    )
+                                    .first()
+                                )
+                            except Exception:
+                                msg_context = None
+
+                        ws_colaborador_id = getattr(msg_context, "colaborador_id", None) if msg_context is not None else None
+                        ws_colaborador_nome = getattr(msg_context, "colaborador_nome_snapshot", None) if msg_context is not None else None
+                        ws_departamento_id = getattr(msg_context, "departamento_id", None) if msg_context is not None else None
+                        ws_departamento_nome = getattr(msg_context, "departamento_nome_snapshot", None) if msg_context is not None else None
+
                         ws_payload = {
                             "type": "message",
                             "event": "message",
@@ -2496,8 +2585,14 @@ async def on_messages_upsert(inst_id: str, data):
                             "instance_name": getattr(inst, "instance_name", None),
 
                             "atendimento_id": atendimento_id,
-                            "departamento_id": (getattr(cliente, "departamento_id", None) if cliente else None),
-                            "colaborador_id": (getattr(cliente, "colaborador_id", None) if cliente else None),
+                            "departamento_id": ws_departamento_id,
+                            "departamento_nome": ws_departamento_nome,
+                            "colaborador_id": ws_colaborador_id,
+                            "atendente_id": ws_colaborador_id,
+                            "colaborador_nome": ws_colaborador_nome,
+                            "atendente_nome": ws_colaborador_nome,
+                            "autor_nome": ws_colaborador_nome,
+                            "enviado_por_nome": ws_colaborador_nome,
 
                             "telefone": formatar_telefone_br(telefone),
                             "telefone_norm": telefone,

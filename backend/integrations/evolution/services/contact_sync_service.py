@@ -68,6 +68,8 @@ async def process_contacts_event(first: str, payload: dict | list):
                     nome=c.get("nome_default"),
                     nome_whatsapp=c.get("nome"),
                     avatar_url=c.get("avatar_url"),
+                    self_profile_name=getattr(inst, "perfil_nome_whatsapp", None),
+                    allow_self_name_repair=bool(c.get("nome")),
                 )
                 if cli_id:
                     mudou = True
@@ -151,6 +153,8 @@ async def sync_contatos_completos(inst_id: str):
                 nome=c.get("nome_default"),
                 nome_whatsapp=c.get("nome"),
                 avatar_url=c.get("avatar_url"),
+                self_profile_name=getattr(inst, "perfil_nome_whatsapp", None),
+                allow_self_name_repair=bool(c.get("nome")),
             )
             if cli_id:
                 imported += 1

@@ -482,6 +482,13 @@ UPSERT_CLIENTE_SQL = text(
                 AND NOT (EXCLUDED.nome ~ '^[0-9]{13,}$')
                 AND (
                     COALESCE(BTRIM(public.clientes.nome), '') = ''
+                    OR (
+                        :allow_self_name_repair = TRUE
+                        AND COALESCE(BTRIM(:self_profile_name), '') <> ''
+                        AND LOWER(BTRIM(public.clientes.nome)) = LOWER(BTRIM(:self_profile_name))
+                        AND LOWER(BTRIM(COALESCE(public.clientes.nome_whatsapp, ''))) = LOWER(BTRIM(:self_profile_name))
+                        AND LOWER(BTRIM(EXCLUDED.nome)) <> LOWER(BTRIM(:self_profile_name))
+                    )
                     OR LOWER(BTRIM(public.clientes.nome)) IN (
                         'cliente',
                         'contato',
@@ -540,6 +547,13 @@ UPSERT_CLIENTE_SQL = text(
                 AND NOT (EXCLUDED.nome_whatsapp ~ '^[0-9]{13,}$')
                 AND (
                     COALESCE(BTRIM(public.clientes.nome_whatsapp), '') = ''
+                    OR (
+                        :allow_self_name_repair = TRUE
+                        AND COALESCE(BTRIM(:self_profile_name), '') <> ''
+                        AND LOWER(BTRIM(public.clientes.nome)) = LOWER(BTRIM(:self_profile_name))
+                        AND LOWER(BTRIM(COALESCE(public.clientes.nome_whatsapp, ''))) = LOWER(BTRIM(:self_profile_name))
+                        AND LOWER(BTRIM(EXCLUDED.nome_whatsapp)) <> LOWER(BTRIM(:self_profile_name))
+                    )
                     OR LOWER(BTRIM(public.clientes.nome_whatsapp)) IN (
                         'cliente',
                         'contato',
@@ -665,6 +679,8 @@ def upsert_cliente_repo(
     nome: str | None = None,
     nome_whatsapp: str | None = None,
     avatar_url: str | None = None,
+    self_profile_name: str | None = None,
+    allow_self_name_repair: bool = False,
 ) -> int | None:
     """
     UPSERT robusto por telefone_norm canônico.
@@ -676,6 +692,8 @@ def upsert_cliente_repo(
     - "Contato do WhatsApp" nunca é gravado como nome.
     - Cliente existente não tem nome manual sobrescrito por pushName novo.
     - Só preenche nome/nome_whatsapp se estiver vazio ou placeholder.
+    - Pode reparar vazamento do nome do próprio WhatsApp quando o caller
+      fornece um nome de contato confiável e ``allow_self_name_repair=True``.
 
     Segurança:
     - Nunca retorna cliente_id fantasma.
@@ -727,6 +745,8 @@ def upsert_cliente_repo(
                 "nome": nome_final,
                 "nome_whatsapp": nome_wa_final,
                 "avatar_url": avatar_clean,
+                "self_profile_name": _clean_str(self_profile_name),
+                "allow_self_name_repair": bool(allow_self_name_repair),
             },
         ).first()
 

@@ -954,6 +954,12 @@ def _lid_digits_from_jid(raw: str | None) -> str | None:
     return digits or None
 
 
+def _same_name_ci(a: Any, b: Any) -> bool:
+    sa = str(a or "").strip().casefold()
+    sb = str(b or "").strip().casefold()
+    return bool(sa and sb and sa == sb)
+
+
 def _push_name_ruim_para_historico(push_name: Any, *, raw_remote_jid: str | None, telefone: str | None) -> bool:
     push = str(push_name or "").strip()
     if not push:
@@ -1731,9 +1737,29 @@ async def on_messages_set(inst_id: str, data):
                             continue
 
                         from_me = bool(key.get("fromMe", False))
+                        self_profile_name = str(getattr(inst, "perfil_nome_whatsapp", None) or "").strip() or None
+
+                        # Em mensagem de saída, pushName/senderName identifica o
+                        # próprio WhatsApp conectado. Ele NÃO é nome do cliente.
+                        inbound_push_name = None
+                        if not from_me:
+                            inbound_push_name = m.get("pushName") or m.get("senderName")
+
+                        # Em histórico de SAÍDA não usamos nome vindo da tabela
+                        # de identidades. Ela pode carregar um pushName antigo
+                        # contaminado pelo próprio WhatsApp e o perfil da instância
+                        # pode estar salvo como "Eu". Para saída, telefone é o
+                        # fallback seguro; mensagens recebidas enriquecem o nome.
+                        identity_name_for_contact = None if from_me else identity_push_name
+                        if (
+                            identity_name_for_contact
+                            and _same_name_ci(identity_name_for_contact, self_profile_name)
+                            and not (inbound_push_name and _same_name_ci(inbound_push_name, self_profile_name))
+                        ):
+                            identity_name_for_contact = None
 
                         nome_real = _primeiro_nome_real_para_historico(
-                            [identity_push_name, m.get("pushName")],
+                            [inbound_push_name, identity_name_for_contact],
                             raw_remote_jid=raw_remote_jid,
                             telefone=telefone,
                         )
@@ -1777,11 +1803,45 @@ async def on_messages_set(inst_id: str, data):
                                     nome=nome_hist,
                                     nome_whatsapp=nome_real,
                                     avatar_url=avatar_hist,
+                                    self_profile_name=self_profile_name,
+                                    allow_self_name_repair=bool((not from_me) and nome_real),
                                 ),
                             )
 
                             if cli_id:
                                 cliente_cache[cliente_cache_key] = int(cli_id)
+
+                        # Cliente existente também pode ter sido contaminado por
+                        # um pushName de saída antigo. Uma mensagem recebida com
+                        # nome confiável repara apenas quando nome + nome_whatsapp
+                        # ainda são exatamente o perfil da própria instância.
+                        if cli_id and (not from_me) and nome_real:
+                            try:
+                                repaired_id = await _retry_deadlock(
+                                    db,
+                                    lambda: upsert_cliente(
+                                        db,
+                                        empresa_id=empresa_id,
+                                        instancia_id=instancia_id,
+                                        telefone_raw=telefone,
+                                        nome=nome_real,
+                                        nome_whatsapp=nome_real,
+                                        avatar_url=avatar_hist,
+                                        self_profile_name=self_profile_name,
+                                        allow_self_name_repair=True,
+                                    ),
+                                )
+                                if repaired_id:
+                                    cli_id = int(repaired_id)
+                                    cliente_cache[cliente_cache_key] = int(cli_id)
+                            except Exception as e:
+                                _log_ctx(
+                                    "[HIST][cliente-self-name-repair-fail]",
+                                    idx=idx,
+                                    msg_id=msg_id,
+                                    cliente_id=cli_id,
+                                    err=str(e),
+                                )
 
                         if not cli_id:
                             skips += 1

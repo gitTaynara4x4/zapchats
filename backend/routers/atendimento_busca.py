@@ -2100,27 +2100,45 @@ def _extract_profile_name(data: dict) -> Optional[str]:
     me = _nested_dict(data, "me")
     business = _nested_dict(data, "businessProfile")
 
-    return _first_clean_text(
-        data.get("name"),
+    # IMPORTANTE:
+    # Em algumas respostas da Evolution o campo genérico `name` vem como
+    # "Eu"/"Você", enquanto `pushName`/`profileName` contém o nome real
+    # do WhatsApp conectado. Se aceitarmos `name` primeiro, o cache da
+    # instância fica como "Eu" e deixa de reconhecer vazamentos do nome
+    # verdadeiro (ex.: "Taynara") nos contatos.
+    generic_self_labels = {"eu", "você", "voce", "you", "me", "myself"}
+
+    candidates = [
         data.get("pushName"),
         data.get("profileName"),
-        data.get("notifyName"),
         data.get("verifiedName"),
+        data.get("notifyName"),
         data.get("displayName"),
-        profile.get("name"),
         profile.get("pushName"),
         profile.get("profileName"),
         profile.get("displayName"),
+        profile.get("name"),
         instance.get("profileName"),
         instance.get("profile_name"),
-        instance.get("name"),
-        user.get("name"),
         user.get("pushName"),
-        me.get("name"),
+        user.get("name"),
         me.get("pushName"),
-        business.get("name"),
+        me.get("name"),
         business.get("verifiedName"),
-    )
+        business.get("name"),
+        data.get("name"),
+        instance.get("name"),
+    ]
+
+    for value in candidates:
+        clean = _first_clean_text(value)
+        if not clean:
+            continue
+        if clean.casefold() in generic_self_labels:
+            continue
+        return clean
+
+    return None
 
 
 def _extract_profile_about(data: dict) -> Optional[str]:

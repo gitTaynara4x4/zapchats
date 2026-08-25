@@ -194,23 +194,34 @@ function nomeOficialCliente(c) {
 function aplicarNomeOficialNoMerge(novo, antigo) {
   if (!novo || !antigo) return novo;
 
+  const novoNome = cleanName(novo.nome);
+  const novoNomeWhats = cleanName(novo.nome_whatsapp);
+  const novoPush = cleanName(novo.push_name || novo.pushName);
+
   const antigoNome = cleanName(antigo.nome);
   const antigoNomeWhats = cleanName(antigo.nome_whatsapp);
   const antigoPush = cleanName(antigo.push_name || antigo.pushName);
 
-  if (antigoNome && !isPlaceholderName(antigoNome)) {
+  // O payload novo vindo do backend é autoritativo quando traz um nome real.
+  // Antes, qualquer nome antigo não-placeholder era copiado por cima do novo,
+  // fazendo correções de contato ficarem presas na memória do navegador.
+  if ((!novoNome || isPlaceholderName(novoNome)) && antigoNome && !isPlaceholderName(antigoNome)) {
     novo.nome = antigoNome;
-  } else if (!cleanName(novo.nome) && antigoNome) {
+  } else if (!novoNome && antigoNome) {
     novo.nome = antigoNome;
   }
 
-  if (antigoNomeWhats && !isPlaceholderName(antigoNomeWhats)) {
+  if (
+    (!novoNomeWhats || isPlaceholderName(novoNomeWhats))
+    && antigoNomeWhats
+    && !isPlaceholderName(antigoNomeWhats)
+  ) {
     novo.nome_whatsapp = antigoNomeWhats;
-  } else if (!cleanName(novo.nome_whatsapp) && antigoNomeWhats) {
+  } else if (!novoNomeWhats && antigoNomeWhats) {
     novo.nome_whatsapp = antigoNomeWhats;
   }
 
-  if (!cleanName(novo.push_name) && antigoPush) {
+  if ((!novoPush || isPlaceholderName(novoPush)) && antigoPush && !isPlaceholderName(antigoPush)) {
     novo.push_name = antigoPush;
   }
 
